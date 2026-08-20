@@ -35,6 +35,15 @@ header{position:sticky;top:0;z-index:40;background:var(--bg);border-bottom:1px s
 .menubtn{padding:6px 9px;background:var(--card);border:1px solid var(--lin);
   border-radius:8px;color:var(--akz);font-size:15px;cursor:pointer;line-height:1}
 
+/* Laufanzeige im Kopf */
+.lauf{padding:0 10px 7px}
+.laufbalken{height:5px;background:var(--card);border-radius:3px;overflow:hidden}
+.laufbalken>i{display:block;height:100%;width:0;background:var(--akz);
+  border-radius:3px;transition:width .25s ease}
+.laufzeile{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:11px;color:var(--dim)}
+.laufzeile>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.laufzeile>b{margin-left:auto;color:var(--warn);font-weight:700;white-space:nowrap}
+
 /* Schnelleingabe: IMMER sichtbar */
 .quick{display:flex;gap:6px;padding:0 10px 8px}
 .quick input{flex:1;padding:9px 11px;background:var(--panel);border:1px solid var(--lin);
@@ -178,12 +187,17 @@ details.klapp .inh{padding:0 12px 12px}
 
 <header>
   <div class="kopf">
-    <div class="marke">Project<span>Tool</span> <span class="ver" id="verTxt">T20</span></div>
+    <div class="marke">Project<span>Tool</span> <span class="ver" id="verTxt">T24</span></div>
     <button class="projbtn" id="btnProj">
       <span class="pn" id="projName">kein Projekt</span>
       <span class="pz" id="projZahl"></span>
     </button>
     <button class="menubtn" id="btnMenu">☰</button>
+  </div>
+  <!-- Laufanzeige: erscheint bei jedem Hintergrundvorgang, sonst verborgen -->
+  <div class="lauf hidden" id="lauf">
+    <div class="laufbalken"><i id="laufFuell"></i></div>
+    <div class="laufzeile"><span id="laufTxt"></span><b id="laufZahl"></b></div>
   </div>
   <div class="quick">
     <input type="text" id="qIn" placeholder="Notiz, Frage mit ? oder Bug: …" autocomplete="off">
@@ -202,7 +216,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T23", DATUM="2026-08-20";
+const VERSION="T24", DATUM="2026-08-20";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -289,6 +303,62 @@ function ghMerkenLesen(){
   try{ const g=JSON.parse(localStorage.getItem("pt_gh")||"{}");
     GH.token=g.token||""; GH.repo=g.repo||""; GH.zweig=g.zweig||"main"; }catch(e){}
 }
+/* ---------- Laufanzeige ----------
+   laufAn(text) startet, laufSetz(i,n) zeigt Fortschritt, laufAus() beendet.
+   Solange etwas laeuft, warnt der Browser vor dem Schliessen der Seite. */
+let LAUF=null;
+/* REST haelt die am Netz gescheiterten Dateien des letzten Sendelaufs. */
+let REST=[];
+/* Nur einmal warnen, wenn der Browserspeicher nicht mehr annimmt. */
+let sichernGewarnt=false;
+function laufAn(text){
+  LAUF={text:text||"Läuft",i:0,n:0};
+  const e=document.getElementById("lauf"); if(e) e.classList.remove("hidden");
+  laufZeichne(); window.addEventListener("beforeunload",laufWarnung);
+}
+function laufSetz(i,n,text){
+  if(!LAUF) return;
+  LAUF.i=i; LAUF.n=n; if(text) LAUF.text=text; laufZeichne();
+}
+function laufAus(){
+  LAUF=null;
+  const e=document.getElementById("lauf"); if(e) e.classList.add("hidden");
+  window.removeEventListener("beforeunload",laufWarnung);
+}
+function laufWarnung(ev){ ev.preventDefault(); ev.returnValue=""; return ""; }
+function laufZeichne(){
+  if(!LAUF) return;
+  const f=document.getElementById("laufFuell"),
+        t=document.getElementById("laufTxt"),
+        z=document.getElementById("laufZahl");
+  const p=LAUF.n?Math.round(LAUF.i/LAUF.n*100):0;
+  if(f) f.style.width=(LAUF.n?p:8)+"%";
+  if(t) t.textContent=LAUF.text+" — Seite offen lassen";
+  if(z) z.textContent=LAUF.n?(LAUF.i+" / "+LAUF.n):"…";
+}
+function warte(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+/* Wiederholt bei Netzaussetzern. Andere Fehler (Token, Konflikt)
+   werden NICHT wiederholt — die gehen auch beim zweiten Mal schief. */
+function netzFehler(e){
+  const m=String(e&&e.message||"");
+  return m.indexOf("Keine Verbindung")>=0 || m.indexOf("Limit erreicht")>=0
+      || m.indexOf("GitHub meldet 5")>=0;
+}
+async function mitWiederholung(fn,versuche){
+  versuche=versuche||3;
+  let letzter=null;
+  for(let v=0;v<versuche;v++){
+    try{ return await fn(); }
+    catch(e){
+      letzter=e;
+      if(!netzFehler(e)) throw e;
+      if(v<versuche-1) await warte(800*Math.pow(2,v)); /* 0,8s — 1,6s — 3,2s */
+    }
+  }
+  throw letzter;
+}
+
 function ghMerken(){
   try{ localStorage.setItem("pt_gh",JSON.stringify({token:GH.token,repo:GH.repo,zweig:GH.zweig})); }catch(e){}
 }
@@ -374,7 +444,7 @@ async function ghZiehen(still){
     const pr=PROJ[t.name]; pr.dir=t.dir;
     const alt=pr.files[t.rel];
     if(alt&&alt.sha===e.sha&&!alt.schmutzig){ fertig++; return; }
-    const u=await ghBlob(e.sha);
+    const u=await mitWiederholung(()=>ghBlob(e.sha));
     const ext=(t.rel.split(".").pop()||"").toLowerCase();
     let txt; if(istText(ext)){ try{ txt=DEC.decode(u); }catch(x){} }
     if(alt){
@@ -390,11 +460,13 @@ async function ghZiehen(still){
     }
     const o={bytes:u,ext,sha:e.sha}; if(txt!=null) o.text=txt;
     pr.files[t.rel]=o; neu++; fertig++;
-    if(fertig%15===0) toast("Lade … "+fertig+"/"+pfade.length);
+    if(fertig%3===0) laufSetz(fertig,pfade.length);
   };
+  laufAn("Hole aus dem Repository");
   try{
     for(let i=0;i<pfade.length;i+=6) await Promise.all(pfade.slice(i,i+6).map(holen));
   }catch(e){ alert("Abgebrochen: "+e.message); }
+  finally{ laufAus(); }
   /* im Repo geloeschte Dateien lokal entfernen, sofern nicht geaendert */
   Object.keys(PROJ).forEach(n=>{
     const pr=PROJ[n];
@@ -427,17 +499,28 @@ async function ghSchieben(nachricht,alle){
   if(GH.schreiben===false){ alert("Dieser Token darf nur lesen."); return; }
   let baum; try{ baum=await ghBaum(); }catch(e){ alert(e.message); return; }
   let ok=0, konflikt=[];
-  for(const {pr,rel} of offen){
+  REST=[];
+  laufAn(alle?"Sende alle Dateien":"Sende Änderungen");
+  try{
+  for(let idx=0; idx<offen.length; idx++){
+    const {pr,rel}=offen[idx];
+    laufSetz(idx,offen.length);
     const voll=ghVoll(pr,rel), f=pr.files[rel], fern=baum[voll];
     if(!alle && fern && f.sha && fern.sha!==f.sha){ konflikt.push(voll); continue; }
     try{
-      const neuSha=await ghSchreib(voll,f.bytes||ENC.encode(f.text||""),
-        nachricht||("ProjectTool: "+rel),fern?fern.sha:null);
+      const neuSha=await mitWiederholung(()=>ghSchreib(voll,f.bytes||ENC.encode(f.text||""),
+        nachricht||("ProjectTool: "+rel),fern?fern.sha:null));
       f.sha=neuSha; delete f.schmutzig; ok++;
-      /* jede Datei sofort sichern: bricht es ab, ist das Erreichte erhalten */
-      if(alle && ok%10===0){ toast(ok+" von "+offen.length+" gesendet"); await sichern(); }
-    }catch(e){ konflikt.push(voll+" — "+e.message); }
+      /* laufend sichern: bricht es ab, ist das Erreichte erhalten */
+      if(ok%10===0) await sichern();
+    }catch(e){
+      konflikt.push(voll+" — "+e.message);
+      if(netzFehler(e)) REST.push({pr,rel});
+    }
+    await warte(120); /* GitHub nicht ueberfahren */
   }
+  laufSetz(offen.length,offen.length);
+  }finally{ laufAus(); }
   for(const n of Object.keys(PROJ)){
     const pr=PROJ[n], g=pr.geloescht||{};
     for(const rel of Object.keys(g)){
@@ -448,8 +531,22 @@ async function ghSchieben(nachricht,alle){
     }
   }
   GH.letzte=jetzt(); sichern(); zeichne();
-  if(konflikt.length) alert(ok+" gesendet.\n\nNicht gesendet:\n"+konflikt.join("\n"));
+  if(konflikt.length){
+    const kurz=konflikt.slice(0,12).join("\n")+(konflikt.length>12?"\n… und "+(konflikt.length-12)+" weitere":"");
+    alert(ok+" gesendet, "+konflikt.length+" nicht.\n\n"+kurz+
+      (REST.length?"\n\nDavon am Netz gescheitert: "+REST.length+
+       "\nMenü ☰ → \"Rest senden\" wiederholt genau diese.":""));
+  }
   else toast(ok+" Dateien gesendet");
+}
+
+/* "Rest senden" nimmt nur die am Netz gescheiterten, nicht alles noch einmal. */
+async function ghRestSenden(){
+  if(!REST.length){ toast("Kein Rest offen"); return; }
+  REST.forEach(({pr,rel})=>{ if(pr.files[rel]) pr.files[rel].schmutzig=true; });
+  const n=REST.length; REST=[];
+  toast(n+" werden erneut versucht");
+  await ghSchieben("ProjectTool: Rest");
 }
 
 const $=s=>document.querySelector(s);
@@ -692,8 +789,10 @@ async function ladeEintraege(entries,istPatch){
   zeichne();
 }
 async function ladeZip(file){
+  laufAn("Lese "+file.name);
   try{ await ladeEintraege(await unzip(await file.arrayBuffer()),true); }
   catch(e){ alert("Konnte nicht gelesen werden:\n"+e.message); }
+  finally{ laufAus(); }
 }
 async function ladeOrdner(fileList){
   /* Fix 1: manche Browser (vor allem am Handy) liefern beim Ordnerwaehlen
@@ -708,11 +807,16 @@ async function ladeOrdner(fileList){
     return;
   }
   const entries={};
-  for(const f of fileList){
-    const p=f.webkitRelativePath||f.name;
-    if(/(^|\/)(node_modules|\.git)\//.test(p)) continue;
-    entries[p]={bytes:new Uint8Array(await f.arrayBuffer())};
-  }
+  laufAn("Lese Ordner");
+  try{
+    let i=0;
+    for(const f of fileList){
+      laufSetz(i++,fileList.length);
+      const p=f.webkitRelativePath||f.name;
+      if(/(^|\/)(node_modules|\.git)\//.test(p)) continue;
+      entries[p]={bytes:new Uint8Array(await f.arrayBuffer())};
+    }
+  }finally{ laufAus(); }
   await ladeEintraege(entries,false);
 }
 
@@ -810,8 +914,17 @@ let datTimer=null, fileTimer=null;
 async function sichern(){
   if(!bereit) return;
   const st=standObjekt();
-  try{ await dbSetz("kv","stand",st); }catch(e){}
-  try{ localStorage.setItem("pt_stand",JSON.stringify(st)); }catch(e){}
+  /* Scheitern beide Wege, ist der Stand nur noch im Arbeitsspeicher.
+     Das darf nicht still passieren — einmal warnen, dann Ruhe. */
+  let db=true, ls=true;
+  try{ await dbSetz("kv","stand",st); }catch(e){ db=false; }
+  try{ localStorage.setItem("pt_stand",JSON.stringify(st)); }catch(e){ ls=false; }
+  if(!db&&!ls){
+    if(!sichernGewarnt){ sichernGewarnt=true;
+      alert("Der Stand liess sich nicht sichern.\n\nBrowserspeicher voll oder gesperrt. "+
+            "Bis das behoben ist, geht beim Schliessen der Seite alles verloren.\n\n"+
+            "Menue \u2630 \u2192 \"Alles senden\" schiebt den Stand ins Repository."); }
+  } else sichernGewarnt=false;
   planeDateien(); planeDatei();
   const el=$("#spzZeit"); if(el) el.textContent=new Date().toLocaleTimeString().slice(0,5);
 }
@@ -928,7 +1041,11 @@ async function exportieren(aus,name,ausT){
   dateien.push(["Projects/ProjectTool.html",ENC.encode(toolQ)]);
   dateien.push(["Projects/manifest_"+pr.name+".json",
     ENC.encode(JSON.stringify({project:pr.name,dir:pr.dir,version:VERSION},null,1))]);
-  const blob=await zip(dateien);
+  laufAn("Baue Export-ZIP");
+  laufSetz(0,dateien.length);
+  let blob;
+  try{ blob=await zip(dateien); laufSetz(dateien.length,dateien.length); }
+  finally{ laufAus(); }
   const a=document.createElement("a");
   a.href=URL.createObjectURL(blob);
   a.download=(name||pr.name)+"_"+stamp()+".zip";
@@ -1615,7 +1732,8 @@ function dlgMenu(){
     <button class="btn" id="mExp">Export ZIP</button></div>
     <div class="reihe" style="margin-top:6px"><button class="btn" id="mAend">Paket einlesen</button>
     <button class="btn" id="mOrd">Ordner wählen</button></div>
-    <div class="reihe" style="margin-top:6px"><button class="btn" id="mAlle">Alles senden (${ghOffen(true).length})</button></div>
+    <div class="reihe" style="margin-top:6px"><button class="btn" id="mAlle">Alles senden (${ghOffen(true).length})</button>
+    ${REST.length?`<button class="btn" id="mRest">Rest senden (${REST.length})</button>`:""}</div>
     <div class="dim" style="font-size:11.5px;line-height:1.45;margin:2px 0 9px">Schiebt <b>jede</b> Datei ins Repository, auch unveränderte.
     Für den ersten Stand, wenn Dateien aus ZIPs stammen und dem Repository noch unbekannt sind.
     Die Fassung im Repository wird dabei durch die hiesige ersetzt.</div>
@@ -1626,6 +1744,7 @@ function dlgMenu(){
         if(!n){ toast("Keine Dateien geladen"); return; }
         if(confirm(n+" Dateien werden ins Repository geschrieben.\n\nDas überschreibt dort vorhandene Fassungen mit den hiesigen.\nBricht es ab, bleibt das bereits Gesendete erhalten.\n\nFortfahren?"))
           ghSchieben("ProjectTool: Vollstand",true); };
+      if($("#mRest")) $("#mRest").onclick=()=>{ zuDlg(); ghRestSenden(); };
       $("#mGh").onclick=()=>{ zuDlg(); dlgGitHub(); };
       $("#mExp").onclick=()=>{ zuDlg(); dlgExport(); };
       $("#mAend").onclick=()=>{ zuDlg(); $("#fZip").click(); };
@@ -1735,7 +1854,10 @@ ladeEintraege=async function(a,b){ await _le(a,b);
   if(st) standZurueck(st);
   if(DB){
     let keys=[]; try{ keys=await dbSchluessel("dateien"); }catch(e){}
+    if(keys.length) laufAn("Stelle Projektdateien wieder her");
+    let gel=0;
     for(const n of keys){
+      laufSetz(gel++,keys.length);
       let rec=null; try{ rec=await dbHol("dateien",n); }catch(e){}
       if(!rec||!rec.files) continue;
       if(!PROJ[n]) PROJ[n]=neuProjekt(n,rec.dir);
@@ -1748,6 +1870,7 @@ ladeEintraege=async function(a,b){ await _le(a,b);
       PROJ[n].ent=entLesen(PROJ[n]);
       configUebernehmen(PROJ[n]);
     }
+    laufAus();
   }
   const namen=Object.keys(PROJ);
   if(namen.length) CUR=(st&&st.cur&&PROJ[st.cur])?st.cur:(CUR&&PROJ[CUR]?CUR:namen[0]);
@@ -1755,7 +1878,14 @@ ladeEintraege=async function(a,b){ await _le(a,b);
   bereit=true;
   ghMerkenLesen();
   zeichne();
-  if(GH.token&&GH.repo) await ghZiehen(true);
+  /* Startabgleich lief bisher stumm. Jetzt sichtbar, damit erkennbar ist,
+     ob ueberhaupt etwas passiert und ob es geklappt hat. */
+  if(GH.token&&GH.repo){
+    const vorher=GH.letzte;
+    await ghZiehen(true);
+    if(!GH.an) toast("Abgleich fehlgeschlagen: "+(GH.fehler||"Grund unbekannt"));
+    else if(GH.letzte!==vorher) toast("Mit dem Repository abgeglichen");
+  }
   zeichne();
   sichern();
 })();
