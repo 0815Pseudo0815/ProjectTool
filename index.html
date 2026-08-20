@@ -114,6 +114,9 @@ details.klapp .inh{padding:0 12px 12px}
   border-left:2px solid var(--lin)}
 .ent .qu{font-size:10px;color:var(--dim);margin-top:4px}
 
+.dplus{color:var(--ok);font-family:ui-monospace,monospace;font-size:11px;white-space:pre-wrap;word-break:break-word}
+.dminus{color:var(--warn);font-family:ui-monospace,monospace;font-size:11px;white-space:pre-wrap;word-break:break-word;opacity:.75}
+.dgleich{color:var(--dim);font-family:ui-monospace,monospace;font-size:11px;white-space:pre-wrap;word-break:break-word;opacity:.5}
 /* Diff */
 .dz{font-family:ui-monospace,monospace;font-size:11px;padding:3px 7px;border-radius:4px;
   margin:2px 0;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -199,7 +202,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T22", DATUM="2026-08-19";
+const VERSION="T23", DATUM="2026-08-20";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -213,6 +216,15 @@ const STATUSLISTE=["final","offen","verworfen","referenz"];
 const RANG={final:3,verworfen:2,referenz:1,offen:0};
 const FARBEN=["#5eead4","#8fd67a","#e8c46b","#e0556b","#b48ce8","#6ba8e8","#e8916b","#8899aa"];
 const GESPERRT=["rok","jak","drome","killball","swarves","magskates","goalie","guard shell","glides"];
+
+/* ================= GitHub =================
+   T23: das Repository ist der Speicher. IndexedDB bleibt als stiller
+   Zwischenspeicher fuer offline — es fragt nichts mehr und meldet nichts. */
+const GHAPI="https://api.github.com";
+const GHWURZEL="Projects/";
+const EINGANG="_Eingang/";
+const VERWORFEN="99_Archiv/_verworfen/";
+let GH={token:"",repo:"",zweig:"main",an:false,fehler:"",letzte:null,baum:null,kurz:false};
 
 let PROJ={}, CUR=null, PENDING=null, TOAST=null;
 let S={tab:"_start", datei:null, filter:"", entFilter:"alle", entSuche:""};
@@ -271,6 +283,152 @@ async function dauerAnfordern(){
   await dauerPruefen();
   zeichne();
   toast(dauerhaft?"Speicher ist dauerhaft":"Browser hat es abgelehnt");
+}
+
+function ghMerkenLesen(){
+  try{ const g=JSON.parse(localStorage.getItem("pt_gh")||"{}");
+    GH.token=g.token||""; GH.repo=g.repo||""; GH.zweig=g.zweig||"main"; }catch(e){}
+}
+function ghMerken(){
+  try{ localStorage.setItem("pt_gh",JSON.stringify({token:GH.token,repo:GH.repo,zweig:GH.zweig})); }catch(e){}
+}
+async function ghRuf(pfad,opt){
+  opt=opt||{};
+  const h=Object.assign({"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"},opt.headers||{});
+  if(GH.token) h["Authorization"]="Bearer "+GH.token;
+  let r;
+  try{ r=await fetch(GHAPI+pfad,{method:opt.method||"GET",headers:h,body:opt.body}); }
+  catch(e){ throw new Error("Keine Verbindung zum Netz"); }
+  if(r.status===401) throw new Error("Token abgelehnt oder abgelaufen");
+  if(r.status===403) throw new Error("Kein Schreibrecht oder Limit erreicht");
+  if(r.status===404) throw new Error("Nicht gefunden: "+pfad);
+  if(r.status===409) throw new Error("Repository ist leer");
+  if(r.status===422) throw new Error("Abgelehnt — Datei wurde inzwischen geaendert");
+  if(!r.ok) throw new Error("GitHub meldet "+r.status);
+  return r;
+}
+async function ghVerbinden(){
+  GH.fehler="";
+  if(!GH.token||!GH.repo){ GH.an=false; GH.fehler="Token oder Repository fehlt"; return false; }
+  try{
+    const j=await (await ghRuf("/repos/"+GH.repo)).json();
+    GH.zweig=j.default_branch||GH.zweig;
+    GH.schreiben=!!(j.permissions&&j.permissions.push);
+    GH.an=true;
+  }catch(e){ GH.an=false; GH.fehler=e.message; }
+  return GH.an;
+}
+async function ghBaum(){
+  const j=await (await ghRuf("/repos/"+GH.repo+"/git/trees/"+GH.zweig+"?recursive=1")).json();
+  GH.baum={}; GH.kurz=!!j.truncated;
+  (j.tree||[]).forEach(e=>{ if(e.type==="blob") GH.baum[e.path]={sha:e.sha,size:e.size}; });
+  return GH.baum;
+}
+async function ghBlob(sha){
+  const j=await (await ghRuf("/repos/"+GH.repo+"/git/blobs/"+sha)).json();
+  const b=atob(String(j.content||"").replace(/\s/g,""));
+  const u=new Uint8Array(b.length);
+  for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i);
+  return u;
+}
+function ghPfad(p){ return p.split("/").map(encodeURIComponent).join("/"); }
+async function ghSchreib(pfad,u8,nachricht,sha){
+  const k={message:nachricht||("ProjectTool "+stamp()),content:b64Von(u8),branch:GH.zweig};
+  if(sha) k.sha=sha;
+  const j=await (await ghRuf("/repos/"+GH.repo+"/contents/"+ghPfad(pfad),
+    {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(k)})).json();
+  return j.content&&j.content.sha;
+}
+async function ghLoeschen(pfad,sha,nachricht){
+  await ghRuf("/repos/"+GH.repo+"/contents/"+ghPfad(pfad),
+    {method:"DELETE",headers:{"Content-Type":"application/json"},
+     body:JSON.stringify({message:nachricht||("ProjectTool loescht "+pfad),sha,branch:GH.zweig})});
+}
+/* Repo-Pfad -> Projekt und Dateipfad. Alles ausserhalb Projects/ bleibt liegen. */
+function ghTeil(pfad){
+  if(!pfad.startsWith(GHWURZEL)) return null;
+  const rest=pfad.slice(GHWURZEL.length);
+  const i=rest.indexOf("/");
+  if(i<1) return null;
+  const dir=rest.slice(0,i), rel=rest.slice(i+1);
+  if(!rel) return null;
+  return {name:dir.replace(/^_Project_/,""),dir,rel};
+}
+function ghVoll(pr,rel){ return GHWURZEL+pr.dir+"/"+rel; }
+
+async function ghZiehen(still){
+  if(!await ghVerbinden()){ if(!still) alert("Keine Verbindung: "+GH.fehler); zeichne(); return false; }
+  let baum; try{ baum=await ghBaum(); }catch(e){ if(!still) alert(e.message); return false; }
+  const pfade=Object.keys(baum).filter(ghTeil);
+  if(!pfade.length){ GH.letzte=jetzt(); if(!still) toast("Im Repo liegt noch kein Ordner Projects/"); zeichne(); return true; }
+  let fertig=0, neu=0;
+  const holen=async pf=>{
+    const t=ghTeil(pf), e=baum[pf];
+    if(!PROJ[t.name]) PROJ[t.name]=neuProjekt(t.name,t.dir);
+    const pr=PROJ[t.name]; pr.dir=t.dir;
+    const alt=pr.files[t.rel];
+    if(alt&&alt.sha===e.sha&&!alt.schmutzig){ fertig++; return; }
+    if(alt&&alt.schmutzig){ fertig++; return; }        /* lokale Aenderung nicht ueberfahren */
+    const u=await ghBlob(e.sha);
+    const ext=(t.rel.split(".").pop()||"").toLowerCase();
+    const o={bytes:u,ext,sha:e.sha};
+    if(istText(ext)){ try{ o.text=DEC.decode(u); }catch(x){} }
+    pr.files[t.rel]=o; neu++; fertig++;
+    if(fertig%15===0) toast("Lade … "+fertig+"/"+pfade.length);
+  };
+  try{
+    for(let i=0;i<pfade.length;i+=6) await Promise.all(pfade.slice(i,i+6).map(holen));
+  }catch(e){ alert("Abgebrochen: "+e.message); }
+  /* im Repo geloeschte Dateien lokal entfernen, sofern nicht geaendert */
+  Object.keys(PROJ).forEach(n=>{
+    const pr=PROJ[n];
+    Object.keys(pr.files).forEach(rel=>{
+      const f=pr.files[rel];
+      if(f.sha&&!f.schmutzig&&!baum[ghVoll(pr,rel)]) delete pr.files[rel];
+    });
+    pr.ent=entLesen(pr); configUebernehmen(pr);
+  });
+  const namen=Object.keys(PROJ);
+  if(!CUR||!PROJ[CUR]) CUR=namen[0]||null;
+  GH.letzte=jetzt(); bereit=true; sichern(); zeichne();
+  if(!still) toast(neu?(neu+" Dateien geholt"):"Alles schon aktuell");
+  return true;
+}
+
+function ghOffen(){
+  const l=[];
+  Object.keys(PROJ).forEach(n=>{ const pr=PROJ[n];
+    Object.keys(pr.files).forEach(rel=>{ if(pr.files[rel].schmutzig) l.push({pr,rel}); }); });
+  return l;
+}
+async function ghSchieben(nachricht){
+  const offen=ghOffen();
+  if(!offen.length){ toast("Nichts zu senden"); return; }
+  if(!await ghVerbinden()){ alert("Keine Verbindung: "+GH.fehler); return; }
+  if(GH.schreiben===false){ alert("Dieser Token darf nur lesen."); return; }
+  let baum; try{ baum=await ghBaum(); }catch(e){ alert(e.message); return; }
+  let ok=0, konflikt=[];
+  for(const {pr,rel} of offen){
+    const voll=ghVoll(pr,rel), f=pr.files[rel], fern=baum[voll];
+    if(fern&&f.sha&&fern.sha!==f.sha){ konflikt.push(voll); continue; }
+    try{
+      const neuSha=await ghSchreib(voll,f.bytes||ENC.encode(f.text||""),
+        nachricht||("ProjectTool: "+rel),fern?fern.sha:null);
+      f.sha=neuSha; delete f.schmutzig; ok++;
+    }catch(e){ konflikt.push(voll+" — "+e.message); }
+  }
+  for(const n of Object.keys(PROJ)){
+    const pr=PROJ[n], g=pr.geloescht||{};
+    for(const rel of Object.keys(g)){
+      const voll=ghVoll(pr,rel);
+      if(!baum[voll]){ delete g[rel]; continue; }
+      try{ await ghLoeschen(voll,baum[voll].sha); delete g[rel]; ok++; }
+      catch(e){ konflikt.push(voll+" — "+e.message); }
+    }
+  }
+  GH.letzte=jetzt(); sichern(); zeichne();
+  if(konflikt.length) alert(ok+" gesendet.\n\nNicht gesendet:\n"+konflikt.join("\n"));
+  else toast(ok+" Dateien gesendet");
 }
 
 const $=s=>document.querySelector(s);
@@ -365,7 +523,7 @@ async function zip(dateien){
 
 /* ================= Projektmodell ================= */
 function neuProjekt(name,dir){
-  return {name,dir:dir||("_Project_"+name),files:{},ent:null,entRoh:null,
+  return {name,dir:dir||("_Project_"+name),files:{},geloescht:{},ent:null,entRoh:null,
     config:{farbe:"#5eead4",export:null},meta:{},log:[],pakete:[],schnipsel:[],snapshots:[]};
 }
 function P(){ return PROJ[CUR]||null; }
@@ -373,7 +531,36 @@ function istText(ext){ return TEXTEXT.includes(ext); }
 function dateiText(pr,rel){ const f=pr.files[rel]; return f&&f.text!=null?f.text:""; }
 function setzeDatei(pr,rel,text){
   const ext=(rel.split(".").pop()||"").toLowerCase();
-  pr.files[rel]={bytes:ENC.encode(text),text,ext};
+  const alt=pr.files[rel];
+  pr.files[rel]={bytes:ENC.encode(text),text,ext,sha:alt?alt.sha:null,schmutzig:true};
+}
+/* Datei verschieben, ohne Inhalt anzufassen. Beide Seiten gelten danach
+   als geaendert — das Ziel ist neu, die Quelle muss im Repo weg. */
+function verschiebeDatei(pr,von,nach){
+  const f=pr.files[von]; if(!f) return false;
+  const alt=pr.files[nach];
+  pr.files[nach]={bytes:f.bytes,text:f.text,ext:f.ext,sha:alt?alt.sha:null,schmutzig:true};
+  pr.geloescht=pr.geloescht||{};
+  if(f.sha) pr.geloescht[von]=f.sha;
+  delete pr.files[von];
+  return true;
+}
+function eingangListe(pr){
+  return Object.keys(pr.files).filter(r=>r.startsWith(EINGANG)).sort();
+}
+function eingangZiel(rel){ return rel.slice(EINGANG.length); }
+/* knapper Zeilenvergleich, nur fuer die Anzeige */
+function diffZeilen(a,b){
+  const A=String(a==null?"":a).split("\n"), B=String(b==null?"":b).split("\n");
+  const raus=[]; let i=0,j=0;
+  while(i<A.length||j<B.length){
+    if(i<A.length&&j<B.length&&A[i]===B[j]){ raus.push(["=",A[i]]); i++; j++; continue; }
+    const tA=B.indexOf(A[i],j), tB=A.indexOf(B[j],i);
+    if(j<B.length&&(tB<0||(tA>=0&&tA-j<=tB-i))){ raus.push(["+",B[j]]); j++; }
+    else if(i<A.length){ raus.push(["-",A[i]]); i++; }
+    else break;
+  }
+  return raus;
 }
 function entLesen(pr){
   if(!pr.files[ENTPFAD]) return null;
@@ -820,19 +1007,19 @@ function zeichneSpz(){
   const el=$("#spz");
   /* T22: die Zeile zeigt den Speicher, nicht mehr eine Dateiwahl.
      Gruen heisst: alles liegt dauerhaft im Geraet, nichts ist zu tun. */
-  const kl=!DB?"p-rot":(dauerhaft?"p-gruen":"p-gelb");
-  const tx=!DB?"Kein Dauerspeicher — Browser lässt ihn nicht zu"
-    :(dauerhaft?"Gespeichert, dauerhaft":"Gespeichert, aber nicht gegen Aufräumen gesichert");
+  const n=ghOffen().length;
+  const kl=!GH.token||!GH.repo?"p-rot":(GH.an?(n?"p-gelb":"p-gruen"):"p-rot");
+  const tx=!GH.token||!GH.repo?"Nicht mit GitHub verbunden"
+    :(!GH.an?("Verbindung gestört — "+esc(GH.fehler||"unbekannt"))
+    :(n?(n+" Änderung"+(n===1?"":"en")+" noch nicht gesendet"):"Mit dem Repository im Gleichstand"));
   el.innerHTML='<span class="punkt '+kl+'"></span><span>'+tx+'</span>'+
-    ' <span class="dim" id="spzZeit"></span>'+
-    (fhFrage?'<button class="mini" id="spzErl" style="margin-left:auto">Sicherung fortsetzen</button>':"")+
-    '<button class="mini" id="spzSichern" style="margin-left:'+(fhFrage?"0":"auto")+'">Ausgeben</button>';
-  const c=$("#spzSichern"), e2=$("#spzErl");
-  if(c) c.onclick=standSichernAlsDatei;
-  if(e2) e2.onclick=fhErlauben;
+    ' <span class="dim" id="spzZeit">'+(GH.letzte?GH.letzte.slice(11,16):"")+'</span>'+
+    '<button class="mini" id="spzSync" style="margin-left:auto">'+(n?"Senden":"Abgleichen")+'</button>';
+  const c=$("#spzSync");
+  if(c) c.onclick=()=>{ if(ghOffen().length) ghSchieben(); else ghZiehen(); };
 }
 const TABS=[
-  ["_start","Start"],["_ent","Entscheidungen"],["_dateien","Dateien"],["_meins","Meins"],
+  ["_start","Start"],["_eingang","Eingang"],["_ent","Entscheidungen"],["_dateien","Dateien"],["_meins","Meins"],
   ["_waechter","Wächter"],["_bericht","Bericht"],["_neu","Was ist neu"],["_config","Config"]
 ];
 function zeichneReiter(){
@@ -841,6 +1028,7 @@ function zeichneReiter(){
     let z="";
     if(pr){
       if(id==="_ent"&&pr.ent) z=(pr.ent.eintraege||[]).filter(e=>e.status==="offen").length||"";
+      if(id==="_eingang") z=eingangListe(pr).length||"";
       if(id==="_dateien") z=Object.keys(pr.files).length;
       if(id==="_meins") z=pr.schnipsel.length||"";
       if(id==="_waechter") z=waechter(pr).length||"";
@@ -862,23 +1050,29 @@ function zeile(fertig,titel,text,knoepfe){
 }
 function vLadeliste(){
   const pr=P();
-  const hatDateien=!!(pr&&Object.keys(pr.files).length);
   let h="";
-  if(!hatDateien) h+=zeile(false,"Projektdateien fehlen",
-    "Einmal das Paket einlesen. Danach bleibt es im Gerät — bei jedem Öffnen sofort da.",
-    `<button class="btn haupt" onclick="document.getElementById('fZip').click()">ZIP laden</button>
-     <button class="btn" onclick="document.getElementById('fOrd').click()">Ordner wählen</button>`);
-  if(DB&&!dauerhaft) h+=zeile(false,"Speicher nicht gegen Aufräumen gesichert",
-    "Der Browser darf den Speicher dieser Seite bei Platzmangel leeren. Einmal erlauben, dann nicht mehr.",
-    `<button class="btn" onclick="dauerAnfordern()">Dauerhaft erlauben</button>`);
-  if(!DB) h+=zeile(false,"Kein Dauerspeicher",
-    "Dieser Browser gibt keinen dauerhaften Speicher her — vermutlich privates Fenster. Der Stand geht beim Schließen verloren.","");
-  if(speicherKann&&fhFrage) h+=zeile(false,"Sicherungsdatei bestätigen",
-    "Die Datei ist gemerkt, der Browser will den Schreibzugriff nach dem Neustart einmal bestätigt haben.",
-    `<button class="btn" onclick="fhErlauben()">Fortsetzen</button>`);
-  if(speicherKann&&!fh) h+=zeile(false,"Automatische Sicherung aus",
-    "Einmal eine Datei wählen, danach schreibt das Tool selbst hinein. Nur für den Umzug auf ein anderes Gerät nötig.",
-    `<button class="btn" onclick="dateiWaehlen()">Datei wählen</button>`);
+  if(!GH.token||!GH.repo) h+=zeile(false,"Noch nicht mit GitHub verbunden",
+    "Repository und Token einmal eintragen. Danach lädt und sichert das Tool von selbst — keine ZIPs mehr.",
+    `<button class="btn haupt" onclick="dlgGitHub()">Verbindung einrichten</button>`);
+  else if(!GH.an) h+=zeile(false,"Verbindung gestört",
+    esc(GH.fehler||"Grund unbekannt")+" — Angaben prüfen oder erneut abgleichen.",
+    `<button class="btn haupt" onclick="ghZiehen()">Erneut versuchen</button>
+     <button class="btn" onclick="dlgGitHub()">Verbindung</button>`);
+  else {
+    const n=ghOffen().length;
+    if(n) h+=zeile(false,n+" Änderung"+(n===1?"":"en")+" nur lokal",
+      "Noch nicht im Repository. Bis dahin liegen sie allein in diesem Browser.",
+      `<button class="btn haupt" onclick="ghSchieben()">Jetzt senden</button>`);
+    if(!pr||!Object.keys(pr.files).length) h+=zeile(false,"Noch keine Projektdateien",
+      "Im Repository liegt noch kein Ordner Projects/. Bis dahin lässt sich ein Paket von Hand einlesen.",
+      `<button class="btn" onclick="document.getElementById('fZip').click()">ZIP laden</button>`);
+  }
+  if(pr){
+    const e=eingangListe(pr).length;
+    if(e) h+=zeile(false,e+" Datei"+(e===1?"":"en")+" wartet auf dich",
+      "Änderungen liegen im Eingang. Nichts davon ist übernommen, solange du es nicht bestätigst.",
+      `<button class="btn haupt" onclick="S.tab='_eingang';zeichne()">Eingang öffnen</button>`);
+  }
   return h;
 }
 function vStart(){
@@ -917,6 +1111,100 @@ function vStart(){
   else pr.log.slice(-6).reverse().forEach(l=>{
     h+=`<div class="zeile"><span class="nm">${esc(l.datei)}</span><span class="kb">${esc(l.art)}</span></div>`;});
   return h;
+}
+
+/* ================= Eingang =================
+   Nichts geht in den Arbeitsbaum, ohne dass Sebastian tippt. */
+let eingOffen=null;
+function vEingang(){
+  const pr=P(); if(!pr) return '<div class="card dim">Kein Projekt.</div>';
+  const liste=eingangListe(pr);
+  if(!liste.length) return `<div class="card"><b style="color:var(--ok)">✓ Eingang leer</b>
+    <div class="dim" style="font-size:11.5px;margin-top:4px">Es wartet nichts auf Bestätigung.
+    Neue Dateien landen unter ${esc(EINGANG)} und erscheinen hier.</div></div>`;
+  let h=`<div class="card" style="border-color:var(--warn)">
+    <b style="color:var(--warn)">${liste.length} wartet auf Bestätigung</b>
+    <div class="dim" style="font-size:11.5px;margin-top:3px">Übernehmen schreibt in den Arbeitsbaum.
+    Verwerfen legt die Datei nach ${esc(VERWORFEN)} — gelöscht wird nichts.</div>
+    <div class="reihe" style="margin:8px 0 0">
+      <button class="btn haupt" id="eiAlle">Alle übernehmen</button></div></div>`;
+  liste.forEach((rel,i)=>{
+    const ziel=eingangZiel(rel), f=pr.files[rel], alt=pr.files[ziel];
+    const art=alt?"ersetzt":"neu";
+    const gr=(f.bytes||[]).length||0;
+    h+=`<div class="card">
+      <div class="kopfz"><span class="kid">${esc(ziel)}</span>
+      <span class="tag t-${alt?"offen":"final"}">${art}</span>
+      <span class="dt">${kb(gr)}</span></div>`;
+    if(alt&&istText(f.ext)){
+      const d=diffZeilen(alt.text||"",f.text||"");
+      const raus=d.filter(x=>x[0]!=="=").length;
+      h+=`<details class="klapp"><summary>${raus} Zeile${raus===1?"":"n"} anders</summary><div class="inh">`;
+      let gezeigt=0;
+      d.forEach((x,k)=>{
+        if(x[0]==="="){ 
+          const nah=d.slice(Math.max(0,k-2),k+3).some(y=>y[0]!=="=");
+          if(!nah) return;
+        }
+        if(gezeigt++>120) return;
+        const kl=x[0]==="+"?"dplus":x[0]==="-"?"dminus":"dgleich";
+        h+=`<div class="${kl}">${esc((x[0]==="="?"  ":x[0]+" ")+x[1])}</div>`;
+      });
+      h+=`</div></details>`;
+    } else if(!alt&&istText(f.ext)){
+      h+=`<details class="klapp"><summary>Inhalt ansehen</summary><div class="inh">
+        <pre style="white-space:pre-wrap;font-size:11px">${esc(String(f.text||"").slice(0,4000))}</pre></div></details>`;
+    }
+    h+=`<div class="reihe" style="margin:8px 0 0">
+      <button class="btn haupt" data-eiok="${esc(rel)}">Übernehmen</button>
+      <button class="btn" data-einein="${esc(rel)}">Verwerfen</button>
+      <button class="btn" data-eispaet="${esc(rel)}">Später</button></div></div>`;
+  });
+  return h;
+}
+function eingUebernehmen(rel){
+  const pr=P(), ziel=eingangZiel(rel);
+  if(!pr.files[rel]) return;
+  verschiebeDatei(pr,rel,ziel);
+  pr.log.push({t:jetzt(),art:"übernommen",datei:ziel});
+  if(ziel===ENTPFAD) pr.ent=entLesen(pr);
+  if(ziel===CFGPFAD) configUebernehmen(pr);
+}
+function eingVerwerfen(rel){
+  const pr=P();
+  if(!pr.files[rel]) return;
+  verschiebeDatei(pr,rel,VERWORFEN+stamp()+"/"+eingangZiel(rel));
+  pr.log.push({t:jetzt(),art:"verworfen",datei:rel});
+}
+
+function dlgGitHub(){
+  dialog(`<h3>GitHub</h3>
+    <div class="dim" style="font-size:11.5px;margin-bottom:8px">
+      Das Repository ist der Speicher. Der Token bleibt in diesem Browser und wird nie versendet
+      — außer an GitHub selbst.</div>
+    <label class="dim" style="font-size:11px">Repository (Konto/Name)</label>
+    <input type="text" id="ghR" value="${esc(GH.repo)}" placeholder="0815Pseudo0815/ProjectTool_Data" autocomplete="off">
+    <label class="dim" style="font-size:11px;margin-top:8px;display:block">Token</label>
+    <input type="password" id="ghT" value="${esc(GH.token)}" placeholder="github_pat_…" autocomplete="off">
+    <div class="dim" style="font-size:11px;margin-top:6px">
+      Fine-grained Token, nur dieses Repository, Contents: Read and write.</div>
+    <div class="reihe" style="margin-top:10px">
+      <button class="btn haupt" id="ghOk">Speichern und abgleichen</button>
+      <button class="btn" id="ghNo">Abbrechen</button></div>
+    <div class="reihe"><button class="btn" id="ghWeg">Verbindung entfernen</button></div>`,()=>{
+      $("#ghOk").onclick=async()=>{
+        GH.repo=$("#ghR").value.trim().replace(/^https?:\/\/github\.com\//,"").replace(/\.git$/,"").replace(/\/$/,"");
+        GH.token=$("#ghT").value.trim();
+        ghMerken(); zuDlg();
+        toast("Verbinde …");
+        await ghZiehen();
+      };
+      $("#ghNo").onclick=zuDlg;
+      $("#ghWeg").onclick=()=>{
+        if(!confirm("Verbindung entfernen? Die Dateien bleiben im Browser, werden aber nicht mehr abgeglichen.")) return;
+        GH.token=""; GH.repo=""; GH.an=false; ghMerken(); zuDlg(); zeichne();
+      };
+    });
 }
 
 function vEnt(){
@@ -1075,12 +1363,14 @@ function vConfig(){
     <div class="card"><b>Projekt</b>
     <p class="dim" style="font-size:12px">Name ${esc(pr.name)} · Ordner ${esc(pr.dir)} · ${Object.keys(pr.files).length} Dateien</p></div>
     <div class="card"><b>Speichern</b>
-    <p class="dim" style="font-size:12px">${autoAn?"Autospeichern läuft in eine echte Datei.":"Noch keine Datei gewählt. Es läuft nur die Sicherung im Browserspeicher."}</p>
-    <div class="reihe">${speicherKann?`<button class="btn" id="cfgDatei">Datei wählen</button>
-    <button class="btn" id="cfgLaden">Arbeitsstand laden</button>`:""}
-    <button class="btn haupt" id="cfgSichern">Als Datei sichern</button>
+    <p class="dim" style="font-size:12px">${GH.token&&GH.repo
+      ? (GH.an?("Repository "+esc(GH.repo)+", Zweig "+esc(GH.zweig)+"."+(GH.letzte?" Zuletzt abgeglichen "+GH.letzte.slice(11,16)+".":""))
+             :("Verbindung gestört: "+esc(GH.fehler||"unbekannt")))
+      : "Noch nicht verbunden. Bis dahin liegt alles nur in diesem Browser."}</p>
+    <div class="reihe"><button class="btn haupt" id="cfgGh">Verbindung</button>
+    <button class="btn" id="cfgSichern">Als Datei sichern</button>
     <button class="btn" id="cfgAusDatei">Aus Datei laden</button></div>
-    <p class="dim" style="font-size:11px;margin:4px 0 0">Der Weg über Datei funktioniert auf jedem Gerät, auch am Handy.</p></div>
+    <p class="dim" style="font-size:11px;margin:4px 0 0">Der Browserspeicher bleibt als stiller Zwischenspeicher, damit ohne Netz weitergearbeitet werden kann.</p></div>
     <div class="card"><b>Gefahrenzone</b>
     <p class="dim" style="font-size:12px">Setzt nur den Arbeitsstand zurück, keine Projektdateien.</p>
     <div class="reihe"><button class="btn warn" id="cfgReset">Arbeitsstand zurücksetzen</button></div></div>`;
@@ -1170,7 +1460,7 @@ function zeichne(){
   $("#projZahl").textContent=pr?Object.keys(pr.files).length:"";
   if(pr&&pr.config.farbe) document.documentElement.style.setProperty("--akz",pr.config.farbe);
   zeichneSpz(); zeichneReiter();
-  const V={_start:vStart,_ent:vEnt,_dateien:vDateien,_meins:vMeins,_waechter:vWaechter,
+  const V={_start:vStart,_eingang:vEingang,_ent:vEnt,_dateien:vDateien,_meins:vMeins,_waechter:vWaechter,
     _bericht:vBericht,_neu:vNeu,_config:vConfig,_merge:vMerge};
   $("#main").innerHTML=(V[S.tab]||vStart)();
   binde();
@@ -1198,9 +1488,17 @@ function binde(){
     pr.config.farbe=b.dataset.farbe; configSchreiben(pr); sichern(); zeichne();});
   const wz=$("#wzRahmen");
   if(wz&&pr&&S.datei&&pr.files[S.datei]) wz.srcdoc=pr.files[S.datei].text;
+  m.querySelectorAll("[data-eiok]").forEach(b=>b.onclick=()=>{
+    eingUebernehmen(b.dataset.eiok); sichern(); zeichne(); toast("Übernommen"); });
+  m.querySelectorAll("[data-einein]").forEach(b=>b.onclick=()=>{
+    eingVerwerfen(b.dataset.einein); sichern(); zeichne(); toast("Verworfen — liegt im Archiv"); });
+  m.querySelectorAll("[data-eispaet]").forEach(b=>b.onclick=()=>toast("Bleibt liegen"));
+  const ea=$("#eiAlle"); if(ea) ea.onclick=()=>{
+    const l=eingangListe(pr);
+    if(!confirm(l.length+" Dateien übernehmen?")) return;
+    l.forEach(eingUebernehmen); sichern(); zeichne(); toast(l.length+" übernommen"); };
   const bb=$("#bearb"); if(bb) bb.onclick=()=>bearbeiten();
-  const cd=$("#cfgDatei"); if(cd) cd.onclick=dateiWaehlen;
-  const cl=$("#cfgLaden"); if(cl) cl.onclick=standLaden;
+  const cg=$("#cfgGh"); if(cg) cg.onclick=dlgGitHub;
   const cs=$("#cfgSichern"); if(cs) cs.onclick=standSichernAlsDatei;
   const ca=$("#cfgAusDatei"); if(ca) ca.onclick=()=>$("#fStand").click();
   const cr=$("#cfgReset"); if(cr) cr.onclick=()=>{
@@ -1289,13 +1587,17 @@ function dlgProjekt(){
 }
 
 function dlgMenu(){
+  const n=ghOffen().length;
   dialog(`<h3>Menü</h3>
-    <div class="reihe"><button class="btn haupt" id="mExp">Export ZIP</button></div>
-    <div class="reihe"><button class="btn" id="mAend">Änderungen laden</button>
+    <div class="reihe"><button class="btn haupt" id="mSync">${n?("Senden ("+n+")"):"Mit GitHub abgleichen"}</button></div>
+    <div class="reihe"><button class="btn" id="mGh">Verbindung</button>
+    <button class="btn" id="mExp">Export ZIP</button></div>
+    <div class="reihe" style="margin-top:6px"><button class="btn" id="mAend">Paket einlesen</button>
     <button class="btn" id="mOrd">Ordner wählen</button></div>
-    <div class="reihe" style="margin-top:6px"><button class="btn" onclick="speicherVergessen()">Speicher leeren</button></div>
     <div class="reihe"><button class="btn" id="mSess">Session-Ende</button>
     <button class="btn" id="mZu">Schließen</button></div>`,()=>{
+      $("#mSync").onclick=()=>{ zuDlg(); if(ghOffen().length) ghSchieben(); else ghZiehen(); };
+      $("#mGh").onclick=()=>{ zuDlg(); dlgGitHub(); };
       $("#mExp").onclick=()=>{ zuDlg(); dlgExport(); };
       $("#mAend").onclick=()=>{ zuDlg(); $("#fZip").click(); };
       $("#mOrd").onclick=()=>{ zuDlg(); $("#fOrd").click(); };
@@ -1421,8 +1723,10 @@ ladeEintraege=async function(a,b){ await _le(a,b);
   const namen=Object.keys(PROJ);
   if(namen.length) CUR=(st&&st.cur&&PROJ[st.cur])?st.cur:(CUR&&PROJ[CUR]?CUR:namen[0]);
   if(st&&st.tab) S.tab=st.tab==="_merge"?"_start":st.tab;
-  await fhPruefen();
   bereit=true;
+  ghMerkenLesen();
+  zeichne();
+  if(GH.token&&GH.repo) await ghZiehen(true);
   zeichne();
   sichern();
 })();
