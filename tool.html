@@ -187,7 +187,8 @@ details.klapp .inh{padding:0 12px 12px}
 
 <header>
   <div class="kopf">
-    <div class="marke">Project<span>Tool</span> <span class="ver" id="verTxt">T24</span></div>
+    <canvas id="quad" width="44" height="44" title="Statusquadrat" style="width:22px;height:22px;image-rendering:pixelated;border-radius:4px;cursor:pointer;flex:0 0 auto"></canvas>
+    <div class="marke">Project<span>Tool</span> <span class="ver" id="verTxt">T25</span></div>
     <button class="projbtn" id="btnProj">
       <span class="pn" id="projName">kein Projekt</span>
       <span class="pz" id="projZahl"></span>
@@ -216,7 +217,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T24", DATUM="2026-08-20";
+const VERSION="T25", DATUM="2026-08-20";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -238,6 +239,10 @@ const GHAPI="https://api.github.com";
 const GHWURZEL="Projects/";
 const EINGANG="_Eingang/";
 const VERWORFEN="99_Archiv/_verworfen/";
+/* T25: Ablage des Arbeitsstands im Repository. Liegt in jedem Projekt
+   unter _ProjectTool/stand.json und wird nie als Projektdatei behandelt. */
+const STANDDIR="_ProjectTool/";
+const STANDREL=STANDDIR+"stand.json";
 let GH={token:"",repo:"",zweig:"main",an:false,fehler:"",letzte:null,baum:null,kurz:false};
 
 let PROJ={}, CUR=null, PENDING=null, TOAST=null;
@@ -428,9 +433,74 @@ function ghTeil(pfad){
   if(i<1) return null;
   const dir=rest.slice(0,i), rel=rest.slice(i+1);
   if(!rel) return null;
+  if(rel.startsWith(STANDDIR)) return null;   /* T25: Standdatei ist keine Projektdatei */
   return {name:dir.replace(/^_Project_/,""),dir,rel};
 }
 function ghVoll(pr,rel){ return GHWURZEL+pr.dir+"/"+rel; }
+
+/* ================= Arbeitsstand im Repository (T25) =================
+   Notizen, Bugs, Verlauf und Config eines Projekts liegen bisher nur im
+   Browser. Raeumt der Browser auf, sind sie weg. Ab hier wandern sie als
+   eigene Datei ins Repository — automatisch, ohne Knopf. */
+function ghStandVoll(pr){ return GHWURZEL+pr.dir+"/"+STANDREL; }
+function standScheibe(pr){
+  return {version:VERSION,gesichert:jetzt(),dir:pr.dir,
+    config:pr.config,meta:pr.meta,log:pr.log.slice(-400),schnipsel:pr.schnipsel};
+}
+/* Kern ohne Zeitstempel — nur er entscheidet, ob gesendet werden muss. */
+function standKern(pr){
+  return JSON.stringify({config:pr.config,meta:pr.meta,
+    log:pr.log.slice(-400),schnipsel:pr.schnipsel});
+}
+/* Zusammenfuehren, nie ersetzen: was hier liegt bleibt, was dort liegt kommt dazu. */
+function listeMischen(mein,fremd,schluessel){
+  const da=new Set(mein.map(schluessel));
+  (fremd||[]).forEach(x=>{ if(!x) return; const k=schluessel(x);
+    if(!da.has(k)){ mein.push(x); da.add(k); } });
+  mein.sort((a,b)=>String(a&&a.t||"").localeCompare(String(b&&b.t||"")));
+  return mein;
+}
+async function ghStandHolen(baum){
+  for(const n of Object.keys(PROJ)){
+    const pr=PROJ[n], e=baum&&baum[ghStandVoll(pr)];
+    if(!e) continue;
+    let o=null;
+    try{ o=JSON.parse(DEC.decode(await mitWiederholung(()=>ghBlob(e.sha)))); }catch(x){ continue; }
+    if(!o) continue;
+    listeMischen(pr.schnipsel,o.schnipsel,x=>x.t+"|"+x.art+"|"+x.text);
+    listeMischen(pr.log,o.log,x=>JSON.stringify(x));
+    if(pr.log.length>400) pr.log=pr.log.slice(-400);
+    /* Config bleibt Sache der config.json im Projekt, wird hier nicht angefasst. */
+    if(o.meta) Object.keys(o.meta).forEach(k=>{ if(pr.meta[k]===undefined) pr.meta[k]=o.meta[k]; });
+    pr.standSha=e.sha;
+  }
+}
+async function ghStandSenden(baum){
+  let n=0;
+  for(const nm of Object.keys(PROJ)){
+    const pr=PROJ[nm];
+    if(!pr.dir) continue;
+    if(!pr.schnipsel.length&&!pr.log.length&&!pr.standSha) continue;
+    const kern=standKern(pr);
+    if(pr.standKern===kern) continue;
+    const voll=ghStandVoll(pr);
+    const u=ENC.encode(JSON.stringify(standScheibe(pr),null,1));
+    let sha=(baum&&baum[voll]?baum[voll].sha:null)||pr.standSha||null;
+    try{
+      pr.standSha=await mitWiederholung(()=>ghSchreib(voll,u,"ProjectTool: Arbeitsstand",sha));
+    }catch(e){
+      /* Fassung im Repo ist neuer als der bekannte Stand: Baum auffrischen,
+         einmal erneut versuchen. Scheitert es wieder, bleibt es offen. */
+      if(netzFehler(e)) throw e;
+      const frisch=await ghBaum();
+      if(baum) baum[voll]=frisch[voll];
+      pr.standSha=await ghSchreib(voll,u,"ProjectTool: Arbeitsstand",frisch[voll]?frisch[voll].sha:null);
+    }
+    pr.standKern=kern; n++;
+    await warte(120);
+  }
+  return n;
+}
 
 async function ghZiehen(still){
   if(!await ghVerbinden()){ if(!still) alert("Keine Verbindung: "+GH.fehler); zeichne(); return false; }
@@ -476,6 +546,7 @@ async function ghZiehen(still){
     });
     pr.ent=entLesen(pr); configUebernehmen(pr);
   });
+  try{ await ghStandHolen(baum); }catch(e){}
   const namen=Object.keys(PROJ);
   if(!CUR||!PROJ[CUR]) CUR=namen[0]||null;
   GH.letzte=jetzt(); bereit=true; sichern(); zeichne();
@@ -492,6 +563,67 @@ function ghOffen(alle){
     Object.keys(pr.files).forEach(rel=>{ if(alle||pr.files[rel].schmutzig) l.push({pr,rel}); }); });
   return l;
 }
+/* ================= Selbsttaetiges Senden (T25) =================
+   sichern() plant einen Lauf. Er sendet still: geaenderte Projektdateien,
+   Loeschungen und den Arbeitsstand. Keine Rueckfrage, kein Knopf.
+   Konflikte bleiben liegen — dafuer gibt es den Eingang. */
+let ghTimer=null, ghLaeuft=false, ghPause=0;
+function planeGh(){
+  if(!GH.token||!GH.repo) return;
+  clearTimeout(ghTimer); ghTimer=setTimeout(ghAuto,4000);
+}
+function ghAutoOffen(){
+  if(ghOffen().length) return true;
+  return Object.keys(PROJ).some(n=>{
+    const pr=PROJ[n];
+    if(Object.keys(pr.geloescht||{}).length) return true;
+    if(!pr.schnipsel.length&&!pr.log.length&&!pr.standSha) return false;
+    return pr.standKern!==standKern(pr);
+  });
+}
+async function ghAuto(){
+  if(!GH.token||!GH.repo) return;
+  /* Ein Handlauf hat Vorrang; danach wird nachgeholt. */
+  if(ghLaeuft||LAUF||!bereit){ clearTimeout(ghTimer); ghTimer=setTimeout(ghAuto,3000); return; }
+  const wart=ghPause-Date.now();
+  if(wart>0){ clearTimeout(ghTimer); ghTimer=setTimeout(ghAuto,wart+200); return; }
+  if(!ghAutoOffen()) return;
+  ghLaeuft=true; zeichneSpz();
+  try{
+    if(!GH.an&&!await ghVerbinden()) throw new Error(GH.fehler||"keine Verbindung");
+    if(GH.schreiben===false) throw new Error("Token darf nur lesen");
+    const baum=await ghBaum();
+    for(const {pr,rel} of ghOffen()){
+      const voll=ghVoll(pr,rel), f=pr.files[rel], fern=baum[voll];
+      if(fern&&f.sha&&fern.sha!==f.sha) continue;   /* Konflikt: liegen lassen */
+      f.sha=await ghSchreib(voll,f.bytes||ENC.encode(f.text||""),"ProjectTool: "+rel,fern?fern.sha:null);
+      delete f.schmutzig;
+      await warte(120);
+    }
+    for(const n of Object.keys(PROJ)){
+      const pr=PROJ[n], g=pr.geloescht||{};
+      for(const rel of Object.keys(g)){
+        const voll=ghVoll(pr,rel);
+        if(!baum[voll]){ delete g[rel]; continue; }
+        await ghLoeschen(voll,baum[voll].sha); delete g[rel];
+        await warte(120);
+      }
+    }
+    await ghStandSenden(baum);
+    GH.letzte=jetzt(); GH.autoFehler="";
+    try{ await dbSetz("kv","stand",standObjekt()); }catch(e){}
+  }catch(e){
+    /* Nicht laut werden. Merken, spaeter erneut versuchen. */
+    GH.autoFehler=e.message||"unbekannt";
+    ghPause=Date.now()+20000;
+    clearTimeout(ghTimer); ghTimer=setTimeout(ghAuto,20000);
+  }finally{ ghLaeuft=false; zeichneSpz(); zeichneReiter(); }
+}
+/* Wechselt Sebastian die App oder sperrt das Handy, geht es sofort raus. */
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="hidden"){ clearTimeout(ghTimer); ghAuto(); }
+});
+
 async function ghSchieben(nachricht,alle){
   const offen=ghOffen(alle);
   if(!offen.length){ toast("Nichts zu senden"); return; }
@@ -530,6 +662,7 @@ async function ghSchieben(nachricht,alle){
       catch(e){ konflikt.push(voll+" — "+e.message); }
     }
   }
+  try{ await ghStandSenden(baum); }catch(e){ konflikt.push("Arbeitsstand — "+e.message); }
   GH.letzte=jetzt(); sichern(); zeichne();
   if(konflikt.length){
     const kurz=konflikt.slice(0,12).join("\n")+(konflikt.length>12?"\n… und "+(konflikt.length-12)+" weitere":"");
@@ -642,7 +775,7 @@ async function zip(dateien){
 /* ================= Projektmodell ================= */
 function neuProjekt(name,dir){
   return {name,dir:dir||("_Project_"+name),files:{},geloescht:{},ent:null,entRoh:null,
-    config:{farbe:"#5eead4",export:null},meta:{},log:[],pakete:[],schnipsel:[],snapshots:[]};
+    config:{farbe:"#5eead4",export:null},meta:{},log:[],pakete:[],schnipsel:[],snapshots:[],spaeter:{}};
 }
 function P(){ return PROJ[CUR]||null; }
 function istText(ext){ return TEXTEXT.includes(ext); }
@@ -663,8 +796,20 @@ function verschiebeDatei(pr,von,nach){
   delete pr.files[von];
   return true;
 }
-function eingangListe(pr){
-  return Object.keys(pr.files).filter(r=>r.startsWith(EINGANG)).sort();
+/* T25 Bug spaeter: Zurueckgestellte verschwinden sichtbar aus der Liste.
+   Sie bleiben als Datei liegen und lassen sich wieder einblenden. */
+let zeigeSpaet=false;
+function eingangListe(pr,alle){
+  const l=Object.keys(pr.files).filter(r=>r.startsWith(EINGANG)).sort();
+  if(alle||zeigeSpaet) return l;
+  const sp=pr.spaeter||{};
+  return l.filter(r=>!sp[r]);
+}
+function eingSpaeter(rel){
+  const pr=P(); if(!pr) return;
+  pr.spaeter=pr.spaeter||{}; pr.spaeter[rel]=jetzt();
+  sichern(); zeichne();
+  toast("Zurückgestellt — über \u201eZurückgestellte zeigen\u201c wieder da");
 }
 function eingangZiel(rel){ return rel.slice(EINGANG.length); }
 /* knapper Zeilenvergleich, nur fuer die Anzeige */
@@ -889,7 +1034,7 @@ function standObjekt(){
   Object.keys(PROJ).forEach(n=>{
     const pr=PROJ[n];
     o.projekte[n]={config:pr.config,meta:pr.meta,log:pr.log.slice(-400),
-      schnipsel:pr.schnipsel,dir:pr.dir};
+      schnipsel:pr.schnipsel,dir:pr.dir,spaeter:pr.spaeter||{}};
   });
   return o;
 }
@@ -905,6 +1050,7 @@ function standZurueck(o){
     PROJ[n].meta=q.meta||{};
     PROJ[n].log=q.log||[];
     PROJ[n].schnipsel=q.schnipsel||[];
+    PROJ[n].spaeter=q.spaeter||{};
   });
 }
 /* T22: sichern() schreibt sofort in IndexedDB. Die Projektdateien und die
@@ -925,7 +1071,7 @@ async function sichern(){
             "Bis das behoben ist, geht beim Schliessen der Seite alles verloren.\n\n"+
             "Menue \u2630 \u2192 \"Alles senden\" schiebt den Stand ins Repository."); }
   } else sichernGewarnt=false;
-  planeDateien(); planeDatei();
+  planeDateien(); planeDatei(); planeGh();
   const el=$("#spzZeit"); if(el) el.textContent=new Date().toLocaleTimeString().slice(0,5);
 }
 function planeDateien(){ clearTimeout(datTimer); datTimer=setTimeout(dateienSichern,1200); }
@@ -941,17 +1087,36 @@ async function dateienSichern(){
   }
 }
 function planeDatei(){ if(!(fh&&autoAn)) return; clearTimeout(fileTimer); fileTimer=setTimeout(dateiSchreiben,2500); }
+/* T25: nicht mehr ueberschreiben. Jeder Stand wird als eine Zeile angehaengt
+   (JSON Lines). Alte Staende bleiben damit erhalten und wiederherstellbar.
+   Beim Lesen zaehlt die letzte gueltige Zeile. */
 async function dateiSchreiben(){
   if(!(fh&&autoAn)) return;
-  try{ const w=await fh.createWritable();
-    await w.write(JSON.stringify(standObjekt(),null,1)); await w.close();
+  try{
+    const alt=await fh.getFile();
+    const w=await fh.createWritable({keepExistingData:true});
+    await w.seek(alt.size);
+    await w.write(JSON.stringify(standObjekt())+"\n");
+    await w.close();
   }catch(e){ autoAn=false; fhFrage=true; zeichneSpz(); }
+}
+/* Liest eine Sicherung: letzte gueltige Zeile gewinnt, alte Fassung
+   (eine einzelne JSON-Datei) wird weiterhin verstanden. */
+function standAusText(t){
+  t=String(t||"").trim();
+  if(!t) return null;
+  const z=t.split("\n").filter(x=>x.trim());
+  for(let i=z.length-1;i>=0;i--){
+    try{ return JSON.parse(z[i]); }catch(e){}
+  }
+  try{ return JSON.parse(t); }catch(e){}
+  return null;
 }
 async function dateiWaehlen(){
   if(!speicherKann){ alert("Dieser Browser kann nicht direkt in Dateien schreiben."); return; }
   try{
-    fh=await showSaveFilePicker({suggestedName:"ProjectTool_Sicherung.json",
-      types:[{description:"Sicherung",accept:{"application/json":[".json"]}}]});
+    fh=await showSaveFilePicker({suggestedName:"ProjectTool_Sicherung.jsonl",
+      types:[{description:"Sicherung",accept:{"application/json":[".jsonl",".json"]}}]});
     autoAn=true; fhFrage=false;
     try{ await dbSetz("kv","fh",fh); }catch(e){}
     await sichern(); await dateiSchreiben(); zeichne(); toast("Sicherung laeuft automatisch");
@@ -993,8 +1158,9 @@ function standSichernAlsDatei(){
   toast("Arbeitsstand gesichert");
 }
 async function standAusDatei(file){
-  try{ standZurueck(JSON.parse(await file.text())); sichern(); zeichne(); toast("Arbeitsstand geladen"); }
-  catch(e){ alert("Diese Datei konnte nicht gelesen werden."); }
+  const o=standAusText(await file.text());
+  if(!o){ alert("Diese Datei konnte nicht gelesen werden."); return; }
+  standZurueck(o); sichern(); zeichne(); toast("Arbeitsstand geladen");
 }
 async function standLaden(){
   try{
@@ -1146,19 +1312,24 @@ function zeichneSpz(){
   /* T22: die Zeile zeigt den Speicher, nicht mehr eine Dateiwahl.
      Gruen heisst: alles liegt dauerhaft im Geraet, nichts ist zu tun. */
   const n=ghOffen().length;
-  const kl=!GH.token||!GH.repo?"p-rot":(GH.an?(n?"p-gelb":"p-gruen"):"p-rot");
+  const offen=(typeof ghAutoOffen==="function")&&ghAutoOffen();
+  const kl=!GH.token||!GH.repo?"p-rot":(GH.autoFehler?"p-rot":(GH.an?(offen?"p-gelb":"p-gruen"):"p-rot"));
   const tx=!GH.token||!GH.repo?"Nicht mit GitHub verbunden"
+    :(ghLaeuft?"Sendet …"
+    :(GH.autoFehler?("Senden gestört — "+esc(GH.autoFehler)+", versucht es erneut")
     :(!GH.an?("Verbindung gestört — "+esc(GH.fehler||"unbekannt"))
-    :(n?(n+" Änderung"+(n===1?"":"en")+" noch nicht gesendet"):"Mit dem Repository im Gleichstand"));
-  el.innerHTML='<span class="punkt '+kl+'"></span><span>'+tx+'</span>'+
+    :(offen?"Änderungen gehen gleich raus":"Alles im Repository gesichert"))));
+  el.innerHTML='<span class="punkt '+kl+'"></span><span id="spzTxt" style="cursor:pointer;text-decoration:underline dotted">'+tx+'</span>'+
     ' <span class="dim" id="spzZeit">'+(GH.letzte?GH.letzte.slice(11,16):"")+'</span>'+
     '<button class="mini" id="spzSync" style="margin-left:auto">'+(n?"Senden":"Abgleichen")+'</button>';
   const c=$("#spzSync");
   if(c) c.onclick=()=>{ if(ghOffen().length) ghSchieben(); else ghZiehen(); };
+  const t=$("#spzTxt"); if(t) t.onclick=dlgSpzErklaerung;
+  zeichneQuad();
 }
 const TABS=[
   ["_start","Start"],["_eingang","Eingang"],["_ent","Entscheidungen"],["_dateien","Dateien"],["_meins","Meins"],
-  ["_waechter","Wächter"],["_bericht","Bericht"],["_neu","Was ist neu"],["_config","Config"]
+  ["_waechter","Wächter"],["_repo","Repos"],["_bericht","Bericht"],["_neu","Was ist neu"],["_config","Config"]
 ];
 function zeichneReiter(){
   const pr=P();
@@ -1257,7 +1428,11 @@ let eingOffen=null;
 function vEingang(){
   const pr=P(); if(!pr) return '<div class="card dim">Kein Projekt.</div>';
   const liste=eingangListe(pr);
-  if(!liste.length) return `<div class="card"><b style="color:var(--ok)">✓ Eingang leer</b>
+  const nSp=Object.keys(pr.spaeter||{}).filter(r=>pr.files[r]).length;
+  const spZeile=nSp?`<div class="card"><b>${nSp} zurückgestellt</b>
+    <div class="dim" style="font-size:11.5px;margin-top:3px">Liegt weiter im Eingang, nur ausgeblendet.</div>
+    <div class="reihe" style="margin-top:8px"><button class="btn" onclick="zeigeSpaet=!zeigeSpaet;zeichne()">${zeigeSpaet?"Wieder ausblenden":"Zurückgestellte zeigen"}</button></div></div>`:"";
+  if(!liste.length) return spZeile+`<div class="card"><b style="color:var(--ok)">✓ Eingang leer</b>
     <div class="dim" style="font-size:11.5px;margin-top:4px">Es wartet nichts auf Bestätigung.
     Neue Dateien landen unter ${esc(EINGANG)} und erscheinen hier.</div></div>`;
   let h=`<div class="card" style="border-color:var(--warn)">
@@ -1298,11 +1473,12 @@ function vEingang(){
       <button class="btn" data-einein="${esc(rel)}">Verwerfen</button>
       <button class="btn" data-eispaet="${esc(rel)}">Später</button></div></div>`;
   });
-  return h;
+  return spZeile+h;
 }
 function eingUebernehmen(rel){
   const pr=P(), ziel=eingangZiel(rel);
   if(!pr.files[rel]) return;
+  if(pr.spaeter) delete pr.spaeter[rel];
   verschiebeDatei(pr,rel,ziel);
   pr.log.push({t:jetzt(),art:"übernommen",datei:ziel});
   if(ziel===ENTPFAD) pr.ent=entLesen(pr);
@@ -1311,6 +1487,7 @@ function eingUebernehmen(rel){
 function eingVerwerfen(rel){
   const pr=P();
   if(!pr.files[rel]) return;
+  if(pr.spaeter) delete pr.spaeter[rel];
   verschiebeDatei(pr,rel,VERWORFEN+stamp()+"/"+eingangZiel(rel));
   pr.log.push({t:jetzt(),art:"verworfen",datei:rel});
 }
@@ -1598,7 +1775,7 @@ function zeichne(){
   $("#projZahl").textContent=pr?Object.keys(pr.files).length:"";
   if(pr&&pr.config.farbe) document.documentElement.style.setProperty("--akz",pr.config.farbe);
   zeichneSpz(); zeichneReiter();
-  const V={_start:vStart,_eingang:vEingang,_ent:vEnt,_dateien:vDateien,_meins:vMeins,_waechter:vWaechter,
+  const V={_start:vStart,_eingang:vEingang,_ent:vEnt,_dateien:vDateien,_meins:vMeins,_waechter:vWaechter,_repo:vRepo,
     _bericht:vBericht,_neu:vNeu,_config:vConfig,_merge:vMerge};
   $("#main").innerHTML=(V[S.tab]||vStart)();
   binde();
@@ -1630,7 +1807,7 @@ function binde(){
     eingUebernehmen(b.dataset.eiok); sichern(); zeichne(); toast("Übernommen"); });
   m.querySelectorAll("[data-einein]").forEach(b=>b.onclick=()=>{
     eingVerwerfen(b.dataset.einein); sichern(); zeichne(); toast("Verworfen — liegt im Archiv"); });
-  m.querySelectorAll("[data-eispaet]").forEach(b=>b.onclick=()=>toast("Bleibt liegen"));
+  m.querySelectorAll("[data-eispaet]").forEach(b=>b.onclick=()=>eingSpaeter(b.dataset.eispaet));
   const ea=$("#eiAlle"); if(ea) ea.onclick=()=>{
     const l=eingangListe(pr);
     if(!confirm(l.length+" Dateien übernehmen?")) return;
@@ -1691,6 +1868,213 @@ function schnipsel(text,zu){
   if(S.tab==="_meins") zeichne(); else zeichneReiter();
 }
 
+/* T25: die Statuszeile erklaert sich auf Klick. Bisher stand dort ein
+   Zustand ohne Erklaerung — was er bedeutet, stand nirgends. */
+function dlgSpzErklaerung(){
+  const n=ghOffen().length, offen=ghAutoOffen();
+  let lage;
+  if(!GH.token||!GH.repo) lage="Es ist kein Repository und kein Token eingetragen. Alles, was du tust, liegt allein in diesem Browser. Räumt er auf, ist es weg.";
+  else if(ghLaeuft) lage="Das Werkzeug schiebt gerade Änderungen ins Repository. Nichts tun, es läuft von selbst durch.";
+  else if(GH.autoFehler) lage="Das Senden ist gescheitert: "+GH.autoFehler+". Das Werkzeug versucht es von selbst erneut. Solange liegen die Änderungen nur hier.";
+  else if(!GH.an) lage="Die Verbindung zum Repository steht nicht: "+(GH.fehler||"Grund unbekannt")+".";
+  else if(offen) lage="Es gibt Änderungen, die noch nicht im Repository liegen"+(n?" ("+n+" Dateien)":"")+". Sie gehen in den nächsten Sekunden von selbst raus.";
+  else lage="Alles, was hier liegt, liegt auch im Repository. Nichts zu tun.";
+  dialog(`<h3>Was heißt das?</h3>
+    <div class="dim" style="font-size:12.5px;line-height:1.6">${esc(lage)}</div>
+    <div class="dim" style="font-size:11.5px;line-height:1.55;margin-top:10px">
+    <b>Nur lokal</b> heißt: die Änderung steht in diesem Browser, nicht im Repository.
+    Der Browser darf seinen Speicher jederzeit aufräumen — dann wäre sie verloren.
+    Deshalb sendet das Werkzeug seit T25 von selbst, wenige Sekunden nach jeder Änderung
+    und noch einmal, sobald du die App verlässt.</div>
+    <div class="reihe" style="margin-top:10px">
+      <button class="btn" onclick="zuDlg();S.tab='_repo';zeichne()">Repos ansehen</button>
+      <button class="btn" id="seZu">Schließen</button></div>`,
+    ()=>{ $("#seZu").onclick=zuDlg; });
+}
+
+/* ================= Statusquadrat (T25) =================
+   Kleines Pixelfeld links im Kopf. Es zeigt nur das Wichtigste:
+   Reihe 1 Verbindung, Reihe 2 offene Aenderungen, Reihe 3 Eingang,
+   Reihe 4 Anmerkungen. Ein Klick sagt dasselbe in Worten. */
+function quadDaten(){
+  const pr=P();
+  return {
+    verbunden: !!(GH.token&&GH.repo&&GH.an&&!GH.autoFehler),
+    sendet: !!ghLaeuft,
+    offen: ghOffen().length,
+    eingang: pr?eingangListe(pr).length:0,
+    meins: pr?pr.schnipsel.length:0,
+    version: VERSION,
+    letzte: GH.letzte?GH.letzte.slice(11,16):"—"
+  };
+}
+function zeichneQuad(){
+  const c=document.getElementById("quad"); if(!c) return;
+  const g=c.getContext("2d"); const d=quadDaten();
+  const P4=11;                       /* 4x4 Felder a 11 Pixel */
+  g.clearRect(0,0,44,44);
+  g.fillStyle="#131a24"; g.fillRect(0,0,44,44);
+  const ok="#5eead4", warn="#e8c46b", rot="#e0556b", aus="#243040";
+  const balken=(zeile,n,farbe)=>{
+    for(let i=0;i<4;i++){
+      g.fillStyle = i<n ? farbe : aus;
+      g.fillRect(i*P4+1, zeile*P4+1, P4-2, P4-2);
+    }
+  };
+  balken(0, d.verbunden?4:1, d.sendet?warn:(d.verbunden?ok:rot));
+  balken(1, Math.min(4,d.offen), d.offen?warn:ok);
+  balken(2, Math.min(4,d.eingang), d.eingang?warn:ok);
+  balken(3, Math.min(4,Math.ceil(d.meins/2)), d.meins?ok:aus);
+  c.onclick=dlgQuad;
+}
+function dlgQuad(){
+  const d=quadDaten();
+  dialog(`<h3>Statusquadrat</h3>
+    <div class="dim" style="font-size:12.5px;line-height:1.6">
+    <b>Reihe 1 — Verbindung:</b> ${d.sendet?"sendet gerade":(d.verbunden?"verbunden":"nicht verbunden")}<br>
+    <b>Reihe 2 — offene Änderungen:</b> ${d.offen}<br>
+    <b>Reihe 3 — Eingang:</b> ${d.eingang} wartet<br>
+    <b>Reihe 4 — Anmerkungen:</b> ${d.meins}<br><br>
+    Version ${esc(d.version)} · zuletzt gesendet ${esc(d.letzte)}</div>
+    <div class="reihe" style="margin-top:10px"><button class="btn" id="qZu">Schließen</button></div>`,
+    ()=>{ $("#qZu").onclick=zuDlg; });
+}
+
+/* ================= Repo-Ansicht (T25) =================
+   Zeigt beide Repositories: Werkzeug und Daten. Baum, Groesse, Stand,
+   und fuer das Datenrepo der Unterschied zwischen hier und dort. */
+let REPOBAUM={};
+function partnerRepo(){
+  if(!GH.repo) return "";
+  return /_Data$/.test(GH.repo) ? GH.repo.replace(/_Data$/,"") : GH.repo+"_Data";
+}
+async function repoLaden(name){
+  const j=await (await ghRuf("/repos/"+name+"/git/trees/HEAD?recursive=1")).json();
+  const b={}; (j.tree||[]).forEach(e=>{ if(e.type==="blob") b[e.path]={size:e.size,sha:e.sha}; });
+  return b;
+}
+async function repoAnsichtLaden(){
+  if(!GH.token||!GH.repo){ alert("Erst die Verbindung einrichten."); return; }
+  laufAn("Lese Repositories");
+  try{
+    REPOBAUM[GH.repo]=await repoLaden(GH.repo);
+    const p=partnerRepo();
+    try{ REPOBAUM[p]=await repoLaden(p); }catch(e){ REPOBAUM[p]={_fehler:e.message}; }
+  }catch(e){ alert(e.message); }
+  finally{ laufAus(); zeichne(); }
+}
+/* Was liegt hier, was dort, und wo gehen sie auseinander. */
+function repoVergleich(name){
+  const b=REPOBAUM[name]||{}; const raus=[];
+  const hier={};
+  Object.keys(PROJ).forEach(n=>{ const pr=PROJ[n];
+    Object.keys(pr.files).forEach(rel=>{ hier[ghVoll(pr,rel)]=pr.files[rel]; }); });
+  const alle=new Set(Object.keys(b).filter(k=>k[0]!=="_").concat(Object.keys(hier)));
+  [...alle].sort().forEach(p=>{
+    const f=b[p], l=hier[p];
+    let z="gleich";
+    if(f&&!l) z="nur im Repo";
+    else if(!f&&l) z="nur hier";
+    else if(l.sha&&f.sha!==l.sha) z="verschieden";
+    else if(l.schmutzig) z="hier geändert";
+    raus.push({p,size:f?f.size:(l.bytes?l.bytes.length:0),z});
+  });
+  return raus;
+}
+function vRepo(){
+  if(!GH.token||!GH.repo) return `<div class="card"><b>Nicht verbunden</b>
+    <div class="dim" style="font-size:11.5px;margin-top:4px">Ohne Repository und Token gibt es nichts zu zeigen.</div>
+    <div class="reihe" style="margin-top:8px"><button class="btn haupt" onclick="dlgGitHub()">Verbindung einrichten</button></div></div>`;
+  const p=partnerRepo();
+  let h=`<div class="card"><b>Repositories</b>
+    <div class="dim" style="font-size:11.5px;margin-top:3px">Daten: ${esc(GH.repo)} · Werkzeug: ${esc(p)}</div>
+    <div class="reihe" style="margin-top:8px">
+      <button class="btn haupt" onclick="repoAnsichtLaden()">${Object.keys(REPOBAUM).length?"Neu lesen":"Jetzt lesen"}</button>
+      <button class="btn" onclick="repoOeffnen()">Auf GitHub öffnen</button></div></div>`;
+  [GH.repo,p].forEach(name=>{
+    const b=REPOBAUM[name];
+    if(!b){ h+=`<div class="card dim">${esc(name)} — noch nicht gelesen.</div>`; return; }
+    if(b._fehler){ h+=`<div class="card"><b>${esc(name)}</b><div class="dim" style="font-size:11.5px">Nicht lesbar: ${esc(b._fehler)}</div></div>`; return; }
+    const dat=Object.keys(b).filter(k=>k[0]!=="_");
+    const kb=Math.round(dat.reduce((a,k)=>a+(b[k].size||0),0)/1024);
+    h+=`<div class="card"><b>${esc(name)}</b>
+      <div class="dim" style="font-size:11.5px;margin-top:3px">${dat.length} Dateien · ${kb} KB</div>`;
+    if(name===GH.repo){
+      const v=repoVergleich(name);
+      const ab=v.filter(x=>x.z!=="gleich");
+      h+=`<div class="dim" style="font-size:11.5px;margin-top:4px">${ab.length?ab.length+" Unterschiede zu hier":"deckungsgleich mit hier"}</div>`;
+      if(ab.length) h+=`<details class="klapp"><summary>Unterschiede</summary><div class="inh">`+
+        ab.slice(0,200).map(x=>`<div style="font-size:11px"><b>${esc(x.z)}</b> — ${esc(x.p)}</div>`).join("")+`</div></details>`;
+    }
+    h+=`<details class="klapp"><summary>Alle Dateien</summary><div class="inh">`+
+      dat.sort().slice(0,400).map(k=>`<div style="font-size:11px">${esc(k)} <span class="dim">${Math.round((b[k].size||0)/1024*10)/10} KB</span></div>`).join("")+
+      `</div></details></div>`;
+  });
+  return h;
+}
+function repoOeffnen(){
+  if(!GH.repo){ alert("Kein Repository eingetragen."); return; }
+  window.open("https://github.com/"+GH.repo,"_blank");
+}
+
+/* ================= Testreiter (T25) =================
+   Jeder Punkt erklaert, was er prueft, und laesst sich einzeln ausloesen. */
+const TESTS=[
+  {id:"verb",t:"Verbindung zu GitHub",was:"Fragt das Repository ab. Zeigt, ob Token und Name stimmen und ob geschrieben werden darf.",
+   lauf:async()=>{ if(!await ghVerbinden()) throw new Error(GH.fehler);
+     return "verbunden, Schreiben "+(GH.schreiben?"erlaubt":"nicht erlaubt"); }},
+  {id:"stand",t:"Arbeitsstand liegt im Repo",was:"Sucht die Datei _ProjectTool/stand.json des laufenden Projekts. Ohne sie hängen Notizen allein am Browser.",
+   lauf:async()=>{ const pr=P(); if(!pr) throw new Error("kein Projekt");
+     const b=await ghBaum(); const v=ghStandVoll(pr);
+     if(!b[v]) throw new Error("fehlt noch — wird beim nächsten Senden angelegt");
+     return "vorhanden, "+b[v].size+" Bytes"; }},
+  {id:"offen",t:"Nichts hängt ungesendet fest",was:"Zählt geänderte Dateien und den Arbeitsstand, die noch nicht im Repository liegen.",
+   lauf:async()=>{ const n=ghOffen().length;
+     if(n||ghAutoOffen()) throw new Error(n+" Dateien offen, geht beim nächsten Lauf raus");
+     return "alles gesendet"; }},
+  {id:"db",t:"Browserspeicher nimmt an",was:"Schreibt einen Prüfwert nach IndexedDB und liest ihn zurück.",
+   lauf:async()=>{ if(!DB) throw new Error("IndexedDB nicht offen");
+     const w=jetzt(); await dbSetz("kv","_test",w);
+     if(await dbHol("kv","_test")!==w) throw new Error("zurückgelesen kam etwas anderes");
+     return "schreibt und liest"; }},
+  {id:"dauer",t:"Speicher ist dauerhaft",was:"Fragt den Browser, ob er die Daten dieser Seite beim Aufräumen verschont.",
+   lauf:async()=>{ if(await dauerPruefen()) return "dauerhaft";
+     throw new Error("nicht dauerhaft — der Browser darf aufräumen"); }},
+  {id:"begr",t:"Begriffswächter greift",was:"Prüft alle Texte auf gesperrte Begriffe.",
+   lauf:async()=>{ const pr=P(); if(!pr) throw new Error("kein Projekt");
+     const n=waechter(pr).length;
+     return n?(n+" Fundstellen — im Reiter Wächter"):"keine gesperrten Begriffe"; }},
+  {id:"ent",t:"Entscheidungen lesbar",was:"Liest entscheidungen.json und zählt die Einträge.",
+   lauf:async()=>{ const pr=P(); if(!pr||!pr.ent) throw new Error("nicht geladen");
+     const e=pr.ent.eintraege||[];
+     return e.length+" Einträge, "+e.filter(x=>x.status==="final").length+" final"; }}
+];
+let TESTERG={};
+async function testLauf(id){
+  const t=TESTS.find(x=>x.id===id); if(!t) return;
+  TESTERG[id]={stand:"laeuft"}; dlgTests();
+  try{ TESTERG[id]={stand:"ok",text:await t.lauf()}; }
+  catch(e){ TESTERG[id]={stand:"fehler",text:e.message||"unbekannt"}; }
+  dlgTests();
+}
+async function testAlle(){ for(const t of TESTS) await testLauf(t.id); }
+function dlgTests(){
+  const zeilen=TESTS.map(t=>{
+    const r=TESTERG[t.id];
+    const f=!r?"var(--dim)":(r.stand==="ok"?"var(--ok)":(r.stand==="laeuft"?"var(--warn)":"var(--warn)"));
+    const z=!r?"":(r.stand==="laeuft"?"läuft …":(r.stand==="ok"?"✓ "+r.text:"✗ "+r.text));
+    return `<div class="card" style="border-color:${r&&r.stand==="fehler"?"var(--warn)":"var(--lin)"}">
+      <b>${esc(t.t)}</b>
+      <div class="dim" style="font-size:11.5px;margin-top:3px">${esc(t.was)}</div>
+      ${z?`<div style="font-size:12px;margin-top:5px;color:${f}">${esc(z)}</div>`:""}
+      <div class="reihe" style="margin-top:7px"><button class="btn" onclick="testLauf('${t.id}')">Prüfen</button></div></div>`;
+  }).join("");
+  dialog(`<h3>Tests</h3>
+    <div class="reihe" style="margin-bottom:8px"><button class="btn haupt" onclick="testAlle()">Alle prüfen</button>
+    <button class="btn" id="tZu">Schließen</button></div>${zeilen}`,
+    ()=>{ $("#tZu").onclick=zuDlg; });
+}
+
 /* ================= Dialoge ================= */
 function dialog(html,nach){
   zuDlg();
@@ -1737,6 +2121,8 @@ function dlgMenu(){
     <div class="dim" style="font-size:11.5px;line-height:1.45;margin:2px 0 9px">Schiebt <b>jede</b> Datei ins Repository, auch unveränderte.
     Für den ersten Stand, wenn Dateien aus ZIPs stammen und dem Repository noch unbekannt sind.
     Die Fassung im Repository wird dabei durch die hiesige ersetzt.</div>
+    <div class="reihe" style="margin-top:6px"><button class="btn" id="mTest">Tests</button>
+    <button class="btn" id="mRepo">Repo öffnen</button></div>
     <div class="reihe"><button class="btn" id="mSess">Session-Ende</button>
     <button class="btn" id="mZu">Schließen</button></div>`,()=>{
       $("#mSync").onclick=()=>{ zuDlg(); if(ghOffen().length) ghSchieben(); else ghZiehen(); };
@@ -1749,6 +2135,8 @@ function dlgMenu(){
       $("#mExp").onclick=()=>{ zuDlg(); dlgExport(); };
       $("#mAend").onclick=()=>{ zuDlg(); $("#fZip").click(); };
       $("#mOrd").onclick=()=>{ zuDlg(); $("#fOrd").click(); };
+      $("#mTest").onclick=()=>{ zuDlg(); dlgTests(); };
+      $("#mRepo").onclick=()=>{ zuDlg(); repoOeffnen(); };
       $("#mSess").onclick=()=>{ zuDlg(); sessionEnde(); };
       $("#mZu").onclick=zuDlg;});
 }
