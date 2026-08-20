@@ -412,14 +412,16 @@ async function ghZiehen(still){
   return true;
 }
 
-function ghOffen(){
+/* alle=true: JEDE Datei, auch unveraenderte. Fuer den Erststand,
+   wenn Dateien aus ZIPs kommen und keine Repo-Herkunft tragen. */
+function ghOffen(alle){
   const l=[];
   Object.keys(PROJ).forEach(n=>{ const pr=PROJ[n];
-    Object.keys(pr.files).forEach(rel=>{ if(pr.files[rel].schmutzig) l.push({pr,rel}); }); });
+    Object.keys(pr.files).forEach(rel=>{ if(alle||pr.files[rel].schmutzig) l.push({pr,rel}); }); });
   return l;
 }
-async function ghSchieben(nachricht){
-  const offen=ghOffen();
+async function ghSchieben(nachricht,alle){
+  const offen=ghOffen(alle);
   if(!offen.length){ toast("Nichts zu senden"); return; }
   if(!await ghVerbinden()){ alert("Keine Verbindung: "+GH.fehler); return; }
   if(GH.schreiben===false){ alert("Dieser Token darf nur lesen."); return; }
@@ -427,11 +429,13 @@ async function ghSchieben(nachricht){
   let ok=0, konflikt=[];
   for(const {pr,rel} of offen){
     const voll=ghVoll(pr,rel), f=pr.files[rel], fern=baum[voll];
-    if(fern&&f.sha&&fern.sha!==f.sha){ konflikt.push(voll); continue; }
+    if(!alle && fern && f.sha && fern.sha!==f.sha){ konflikt.push(voll); continue; }
     try{
       const neuSha=await ghSchreib(voll,f.bytes||ENC.encode(f.text||""),
         nachricht||("ProjectTool: "+rel),fern?fern.sha:null);
       f.sha=neuSha; delete f.schmutzig; ok++;
+      /* jede Datei sofort sichern: bricht es ab, ist das Erreichte erhalten */
+      if(alle && ok%10===0){ toast(ok+" von "+offen.length+" gesendet"); await sichern(); }
     }catch(e){ konflikt.push(voll+" — "+e.message); }
   }
   for(const n of Object.keys(PROJ)){
@@ -1611,9 +1615,17 @@ function dlgMenu(){
     <button class="btn" id="mExp">Export ZIP</button></div>
     <div class="reihe" style="margin-top:6px"><button class="btn" id="mAend">Paket einlesen</button>
     <button class="btn" id="mOrd">Ordner wählen</button></div>
+    <div class="reihe" style="margin-top:6px"><button class="btn" id="mAlle">Alles senden (${ghOffen(true).length})</button></div>
+    <div class="dim" style="font-size:11.5px;line-height:1.45;margin:2px 0 9px">Schiebt <b>jede</b> Datei ins Repository, auch unveränderte.
+    Für den ersten Stand, wenn Dateien aus ZIPs stammen und dem Repository noch unbekannt sind.
+    Die Fassung im Repository wird dabei durch die hiesige ersetzt.</div>
     <div class="reihe"><button class="btn" id="mSess">Session-Ende</button>
     <button class="btn" id="mZu">Schließen</button></div>`,()=>{
       $("#mSync").onclick=()=>{ zuDlg(); if(ghOffen().length) ghSchieben(); else ghZiehen(); };
+      $("#mAlle").onclick=()=>{ const n=ghOffen(true).length; zuDlg();
+        if(!n){ toast("Keine Dateien geladen"); return; }
+        if(confirm(n+" Dateien werden ins Repository geschrieben.\n\nDas überschreibt dort vorhandene Fassungen mit den hiesigen.\nBricht es ab, bleibt das bereits Gesendete erhalten.\n\nFortfahren?"))
+          ghSchieben("ProjectTool: Vollstand",true); };
       $("#mGh").onclick=()=>{ zuDlg(); dlgGitHub(); };
       $("#mExp").onclick=()=>{ zuDlg(); dlgExport(); };
       $("#mAend").onclick=()=>{ zuDlg(); $("#fZip").click(); };
