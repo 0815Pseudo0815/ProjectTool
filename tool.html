@@ -79,6 +79,7 @@ main{padding:12px 10px}
 .t-offen{background:rgba(232,196,107,.16);color:var(--warn)}
 .t-verworfen{background:rgba(224,85,107,.16);color:var(--rot)}
 .t-referenz{background:rgba(180,140,232,.16);color:var(--lila)}
+.t-ueberholt{background:rgba(255,255,255,.07);color:var(--dim)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:6px;margin-bottom:10px}
 .stat{background:var(--panel);border:1px solid var(--lin);border-radius:9px;
   padding:9px 6px;text-align:center}
@@ -115,6 +116,7 @@ details.klapp .inh{padding:0 12px 12px}
 .ent.s-offen{border-left-color:var(--warn)}
 .ent.s-verworfen{border-left-color:var(--rot)}
 .ent.s-referenz{border-left-color:var(--lila)}
+.ent.s-ueberholt{border-left-color:var(--dim);opacity:.72}
 .ent .kopfz{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px}
 .ent .kid{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--akz)}
 .ent .dt{font-size:10px;color:var(--dim);margin-left:auto}
@@ -217,7 +219,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T25", DATUM="2026-08-20";
+const VERSION="T26", DATUM="2026-08-20";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -227,8 +229,8 @@ const BILDEXT=["png","jpg","jpeg","gif","webp","bmp"];
 const ENTPFAD="00_Entscheidungen/entscheidungen.json";
 const CFGPFAD="00_Config/config.json";
 const REGELPFAD="01_Regeln/00_ARBEITSWEISE.md";
-const STATUSLISTE=["final","offen","verworfen","referenz"];
-const RANG={final:3,verworfen:2,referenz:1,offen:0};
+const STATUSLISTE=["final","offen","ueberholt","verworfen","referenz"];
+const RANG={final:3,ueberholt:2,verworfen:2,referenz:1,offen:0};
 const FARBEN=["#5eead4","#8fd67a","#e8c46b","#e0556b","#b48ce8","#6ba8e8","#e8916b","#8899aa"];
 const GESPERRT=["rok","jak","drome","killball","swarves","magskates","goalie","guard shell","glides"];
 
@@ -444,13 +446,16 @@ function ghVoll(pr,rel){ return GHWURZEL+pr.dir+"/"+rel; }
    eigene Datei ins Repository — automatisch, ohne Knopf. */
 function ghStandVoll(pr){ return GHWURZEL+pr.dir+"/"+STANDREL; }
 function standScheibe(pr){
+  /* T26: spaeter (zurueckgestellte Eingaenge) hing bis T25 allein am Browser.
+     Steht jetzt mit im Repository. */
   return {version:VERSION,gesichert:jetzt(),dir:pr.dir,
-    config:pr.config,meta:pr.meta,log:pr.log.slice(-400),schnipsel:pr.schnipsel};
+    config:pr.config,meta:pr.meta,log:pr.log.slice(-400),schnipsel:pr.schnipsel,
+    spaeter:pr.spaeter||{}};
 }
 /* Kern ohne Zeitstempel — nur er entscheidet, ob gesendet werden muss. */
 function standKern(pr){
   return JSON.stringify({config:pr.config,meta:pr.meta,
-    log:pr.log.slice(-400),schnipsel:pr.schnipsel});
+    log:pr.log.slice(-400),schnipsel:pr.schnipsel,spaeter:pr.spaeter||{}});
 }
 /* Zusammenfuehren, nie ersetzen: was hier liegt bleibt, was dort liegt kommt dazu. */
 function listeMischen(mein,fremd,schluessel){
@@ -472,6 +477,9 @@ async function ghStandHolen(baum){
     if(pr.log.length>400) pr.log=pr.log.slice(-400);
     /* Config bleibt Sache der config.json im Projekt, wird hier nicht angefasst. */
     if(o.meta) Object.keys(o.meta).forEach(k=>{ if(pr.meta[k]===undefined) pr.meta[k]=o.meta[k]; });
+    /* T26: zusammenfuehren, nie ersetzen — auch hier. */
+    if(o.spaeter){ pr.spaeter=pr.spaeter||{};
+      Object.keys(o.spaeter).forEach(k=>{ if(!pr.spaeter[k]) pr.spaeter[k]=o.spaeter[k]; }); }
     pr.standSha=e.sha;
   }
 }
@@ -930,6 +938,11 @@ async function ladeEintraege(entries,istPatch){
     }
   }
   PENDING={neu,geaendert,gleich,ablage,entDiff,projekte:[...projekte],patch:!!istPatch};
+  /* T26 offen.merge_leer: in ein leeres Projekt gibt es nichts zu vergleichen.
+     Keine Auswahlliste, alles kommt direkt herein. */
+  const nichtsZuVergleichen = !geaendert.length && !gleich.length &&
+    (!entDiff || !entDiff.neu.some(x=>x.art==="geaendert"));
+  if(nichtsZuVergleichen && neu.length){ mergeAnwenden({neu:{},ge:{}},{}); return; }
   S.tab="_merge"; S.datei=null;
   zeichne();
 }
@@ -1536,7 +1549,9 @@ function vEnt(){
     const q=S.entSuche.toLowerCase();
     liste=liste.filter(e=>(e.id+" "+e.text+" "+(e.grund||"")).toLowerCase().includes(q));
   }
-  let h=`<input type="search" id="entS" placeholder="Suchen…" value="${esc(S.entSuche)}" style="margin-bottom:8px">
+  let h=`<div class="reihe" style="margin-bottom:8px">
+      <button class="btn haupt" id="entNeu">Neue Entscheidung</button></div>
+    <input type="search" id="entS" placeholder="Suchen…" value="${esc(S.entSuche)}" style="margin-bottom:8px">
     <div class="reihe">`;
   h+=`<button class="btn ${S.entFilter==="alle"?"haupt":""}" data-f="alle">Alle ${alle.length}</button>`;
   STATUSLISTE.forEach(s=>{
@@ -1556,6 +1571,7 @@ function vEnt(){
       <div class="qu">${esc(e.bereich)} · ${esc(e.quelle||"")}</div>
       <div class="reihe" style="margin:7px 0 0">
         <button class="btn" data-entkomm="${esc(e.id)}" style="font-size:11px;padding:6px 10px">Dazu sagen</button>
+        <button class="btn" data-entedit="${esc(e.id)}" style="font-size:11px;padding:6px 10px">Ändern</button>
       </div></div>`;
   });
   return h;
@@ -1794,6 +1810,8 @@ function binde(){
   const es=$("#entS"); if(es) es.oninput=()=>{S.entSuche=es.value;
     const p=es.selectionStart; zeichne(); const n=$("#entS"); if(n){n.focus();n.setSelectionRange(p,p);} };
   m.querySelectorAll("[data-f]").forEach(b=>b.onclick=()=>{S.entFilter=b.dataset.f;zeichne();});
+  const eNeu=$("#entNeu"); if(eNeu) eNeu.onclick=()=>dlgEntForm(null);
+  m.querySelectorAll("[data-entedit]").forEach(b=>b.onclick=()=>dlgEntForm(b.dataset.entedit));
   m.querySelectorAll("[data-entkomm]").forEach(b=>b.onclick=()=>{
     const t=prompt("Dazu sagen:"); if(!t) return;
     schnipsel(t,b.dataset.entkomm); toast("Notiert");});
@@ -1892,6 +1910,62 @@ function dlgSpzErklaerung(){
     ()=>{ $("#seZu").onclick=zuDlg; });
 }
 
+/* ================= Entscheidungen bearbeiten (T26) =================
+   offen.ent_bearbeiten: anlegen, aendern, Status setzen, loeschen.
+   Geschrieben wird in 00_Entscheidungen/entscheidungen.json des laufenden
+   Projekts; von dort geht es den normalen Weg ins Repository. */
+function dlgEntForm(id){
+  const pr=P(); if(!pr){ alert("Erst ein Projekt laden."); return; }
+  if(!pr.ent) pr.ent={schema:1,projekt:pr.name,erzeugt:heute(),hinweis:"",eintraege:[]};
+  const e=id?pr.ent.eintraege.find(x=>x.id===id):null;
+  if(id&&!e){ alert("Eintrag nicht gefunden."); return; }
+  const bs=[...new Set(pr.ent.eintraege.map(x=>x.bereich).filter(Boolean))].sort();
+  const feld=(l,inner)=>`<div class="dim" style="font-size:11px;margin:7px 0 2px">${l}</div>${inner}`;
+  dialog(`<h3>${e?"Entscheidung ändern":"Neue Entscheidung"}</h3>`+
+    feld("Kennung", `<input id="eId" value="${e?esc(e.id):""}" ${e?"disabled":""} placeholder="bereich.kurzname">`)+
+    feld("Bereich", `<input id="eB" list="eBL" value="${e?esc(e.bereich||""):""}">
+      <datalist id="eBL">${bs.map(b=>`<option value="${esc(b)}">`).join("")}</datalist>`)+
+    feld("Status", `<select id="eS">${STATUSLISTE.map(x=>
+      `<option ${e&&e.status===x?"selected":""}>${x}</option>`).join("")}</select>`)+
+    feld("Text", `<textarea id="eT" rows="4">${e?esc(e.text||""):""}</textarea>`)+
+    feld("Grund", `<textarea id="eG" rows="2">${e?esc(e.grund||""):""}</textarea>`)+
+    `<div class="reihe" style="margin-top:10px">
+      <button class="btn haupt" id="eOk">Speichern</button>
+      ${e?'<button class="btn" id="eDel" style="color:var(--rot)">Löschen</button>':""}
+      <button class="btn" id="eAb">Abbrechen</button></div>`,
+    ()=>{ $("#eAb").onclick=zuDlg;
+      $("#eOk").onclick=()=>entSpeichern(e||null);
+      if($("#eDel")) $("#eDel").onclick=()=>entLoeschen(e.id); });
+}
+function entSpeichern(alt){
+  const pr=P(); if(!pr||!pr.ent) return;
+  const id=alt?alt.id:($("#eId").value||"").trim();
+  if(!id){ alert("Ohne Kennung geht es nicht."); return; }
+  if(!alt&&pr.ent.eintraege.some(x=>x.id===id)){ alert("Diese Kennung gibt es schon: "+id); return; }
+  const t=($("#eT").value||"").trim();
+  if(!t){ alert("Ohne Text geht es nicht."); return; }
+  const o=alt||{id:id,quelle:"Sebastian"};
+  o.bereich=($("#eB").value||"").trim();
+  o.status=$("#eS").value;
+  o.text=t;
+  const g=($("#eG").value||"").trim();
+  if(g) o.grund=g; else delete o.grund;
+  o.datum=heute();
+  if(!alt) pr.ent.eintraege.push(o);
+  pr.log.push({t:jetzt(),art:alt?"geaendert":"neu",datei:ENTPFAD});
+  entSchreiben(pr);
+  zuDlg(); zeichne(); toast(alt?"Geändert":"Angelegt");
+}
+function entLoeschen(id){
+  const pr=P(); if(!pr||!pr.ent) return;
+  if(!confirm("Eintrag "+id+" löschen?\n\nBesser ist der Status \"ueberholt\": "+
+      "dann bleibt nachvollziehbar, was einmal galt.\n\nTrotzdem löschen?")) return;
+  pr.ent.eintraege=pr.ent.eintraege.filter(x=>x.id!==id);
+  pr.log.push({t:jetzt(),art:"geloescht",datei:ENTPFAD});
+  entSchreiben(pr);
+  zuDlg(); zeichne(); toast("Gelöscht");
+}
+
 /* ================= Statusquadrat (T25) =================
    Kleines Pixelfeld links im Kopf. Es zeigt nur das Wichtigste:
    Reihe 1 Verbindung, Reihe 2 offene Aenderungen, Reihe 3 Eingang,
@@ -1904,27 +1978,38 @@ function quadDaten(){
     offen: ghOffen().length,
     eingang: pr?eingangListe(pr).length:0,
     meins: pr?pr.schnipsel.length:0,
+    tests: testStand(pr),
     version: VERSION,
     letzte: GH.letzte?GH.letzte.slice(11,16):"—"
   };
 }
+/* T26: plan.statusquadrat verlangt Testergebnisse je Pruefpunkt. Fehlte. */
+function testStand(pr){
+  const m=(pr&&pr.meta&&pr.meta.tests)||{};
+  let ok=0,fehler=0;
+  TESTS.forEach(t=>{ const r=TESTERG[t.id]||m[t.id]; if(!r) return;
+    if(r.stand==="ok") ok++; else if(r.stand==="fehler") fehler++; });
+  return {ok,fehler,offen:TESTS.length-ok-fehler,n:TESTS.length};
+}
 function zeichneQuad(){
   const c=document.getElementById("quad"); if(!c) return;
   const g=c.getContext("2d"); const d=quadDaten();
-  const P4=11;                       /* 4x4 Felder a 11 Pixel */
+  const P4=11, RH=8;                 /* 5 Reihen a 4 Feldern */
   g.clearRect(0,0,44,44);
   g.fillStyle="#131a24"; g.fillRect(0,0,44,44);
   const ok="#5eead4", warn="#e8c46b", rot="#e0556b", aus="#243040";
   const balken=(zeile,n,farbe)=>{
     for(let i=0;i<4;i++){
       g.fillStyle = i<n ? farbe : aus;
-      g.fillRect(i*P4+1, zeile*P4+1, P4-2, P4-2);
+      g.fillRect(i*P4+1, zeile*RH+2, P4-2, RH-2);
     }
   };
   balken(0, d.verbunden?4:1, d.sendet?warn:(d.verbunden?ok:rot));
   balken(1, Math.min(4,d.offen), d.offen?warn:ok);
   balken(2, Math.min(4,d.eingang), d.eingang?warn:ok);
   balken(3, Math.min(4,Math.ceil(d.meins/2)), d.meins?ok:aus);
+  balken(4, d.tests.fehler?Math.min(4,d.tests.fehler):Math.round(4*d.tests.ok/d.tests.n),
+            d.tests.fehler?rot:(d.tests.ok===d.tests.n?ok:aus));
   c.onclick=dlgQuad;
 }
 function dlgQuad(){
@@ -1934,7 +2019,8 @@ function dlgQuad(){
     <b>Reihe 1 — Verbindung:</b> ${d.sendet?"sendet gerade":(d.verbunden?"verbunden":"nicht verbunden")}<br>
     <b>Reihe 2 — offene Änderungen:</b> ${d.offen}<br>
     <b>Reihe 3 — Eingang:</b> ${d.eingang} wartet<br>
-    <b>Reihe 4 — Anmerkungen:</b> ${d.meins}<br><br>
+    <b>Reihe 4 — Anmerkungen:</b> ${d.meins}<br>
+    <b>Reihe 5 — Tests:</b> ${d.tests.ok} bestanden, ${d.tests.fehler} gefallen, ${d.tests.offen} nie geprüft<br><br>
     Version ${esc(d.version)} · zuletzt gesendet ${esc(d.letzte)}</div>
     <div class="reihe" style="margin-top:10px"><button class="btn" id="qZu">Schließen</button></div>`,
     ()=>{ $("#qZu").onclick=zuDlg; });
@@ -2055,14 +2141,27 @@ async function testLauf(id){
   TESTERG[id]={stand:"laeuft"}; dlgTests();
   try{ TESTERG[id]={stand:"ok",text:await t.lauf()}; }
   catch(e){ TESTERG[id]={stand:"fehler",text:e.message||"unbekannt"}; }
+  testMerken(id);
   dlgTests();
+}
+/* T26: Ergebnisse lagen bis T25 nur im Arbeitsspeicher und waren beim
+   Neuladen weg. Sie stehen jetzt in meta.tests und gehen mit dem
+   Arbeitsstand ins Repository. */
+function testMerken(id){
+  const pr=P(); if(!pr) return;
+  const r=TESTERG[id]; if(!r||r.stand==="laeuft") return;
+  pr.meta=pr.meta||{}; pr.meta.tests=pr.meta.tests||{};
+  pr.meta.tests[id]={stand:r.stand,text:r.text||"",t:jetzt(),version:VERSION};
+  sichern(); zeichneQuad();
 }
 async function testAlle(){ for(const t of TESTS) await testLauf(t.id); }
 function dlgTests(){
+  const pr=P(); const frueher=(pr&&pr.meta&&pr.meta.tests)||{};
   const zeilen=TESTS.map(t=>{
-    const r=TESTERG[t.id];
+    const r=TESTERG[t.id]||frueher[t.id];
     const f=!r?"var(--dim)":(r.stand==="ok"?"var(--ok)":(r.stand==="laeuft"?"var(--warn)":"var(--warn)"));
-    const z=!r?"":(r.stand==="laeuft"?"läuft …":(r.stand==="ok"?"✓ "+r.text:"✗ "+r.text));
+    let z=!r?"":(r.stand==="laeuft"?"läuft …":(r.stand==="ok"?"✓ "+r.text:"✗ "+r.text));
+    if(z&&!TESTERG[t.id]&&r.t) z+="  (vom "+r.t.slice(0,16).replace("T"," ")+")";
     return `<div class="card" style="border-color:${r&&r.stand==="fehler"?"var(--warn)":"var(--lin)"}">
       <b>${esc(t.t)}</b>
       <div class="dim" style="font-size:11.5px;margin-top:3px">${esc(t.was)}</div>
