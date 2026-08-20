@@ -1,0 +1,1431 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ProjectTool</title>
+<style>
+:root{
+  --bg:#0a1420; --panel:#0f1d2e; --card:#132538; --lin:#1e3450;
+  --txt:#dce7f2; --dim:#6b8299; --akz:#5eead4;
+  --ok:#8fd67a; --warn:#e8c46b; --rot:#e0556b; --lila:#b48ce8;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--txt);
+  font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{padding-bottom:70px}
+h1{font-size:16px;margin:0 0 3px;font-weight:800}
+h2{font-size:12px;margin:16px 0 7px;color:var(--akz);text-transform:uppercase;
+   letter-spacing:.08em;font-weight:700}
+a{color:var(--akz)}
+.dim{color:var(--dim)}
+.hidden{display:none!important}
+
+/* ---------- Kopf: EINE Zeile ---------- */
+header{position:sticky;top:0;z-index:40;background:var(--bg);border-bottom:1px solid var(--lin)}
+.kopf{display:flex;align-items:center;gap:8px;padding:8px 10px}
+.marke{font-size:14px;font-weight:800;white-space:nowrap}
+.marke span{color:var(--akz)}
+.ver{font-size:10px;color:var(--warn);font-weight:700}
+.projbtn{margin-left:auto;display:flex;align-items:center;gap:5px;padding:6px 10px;
+  background:var(--card);border:1px solid var(--lin);border-radius:8px;
+  color:var(--txt);font-size:12px;font-weight:700;cursor:pointer;max-width:48%}
+.projbtn .pn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.projbtn .pz{font-size:10px;color:var(--dim);font-weight:600}
+.menubtn{padding:6px 9px;background:var(--card);border:1px solid var(--lin);
+  border-radius:8px;color:var(--akz);font-size:15px;cursor:pointer;line-height:1}
+
+/* Schnelleingabe: IMMER sichtbar */
+.quick{display:flex;gap:6px;padding:0 10px 8px}
+.quick input{flex:1;padding:9px 11px;background:var(--panel);border:1px solid var(--lin);
+  border-radius:8px;color:var(--txt);font-size:13px;min-width:0}
+.quick input:focus{outline:none;border-color:var(--akz)}
+.quick button{padding:9px 14px;background:var(--akz);color:#06202b;border:none;
+  border-radius:8px;font-weight:800;font-size:13px;cursor:pointer}
+.echo{padding:0 10px 8px;font-size:11.5px;color:var(--ok);min-height:0}
+.echo:empty{display:none}
+
+/* Reiter */
+.reiter{display:flex;gap:3px;overflow-x:auto;padding:0 8px 7px;scrollbar-width:none}
+.reiter::-webkit-scrollbar{display:none}
+.reiter button{padding:7px 11px;background:transparent;border:none;border-radius:7px;
+  color:var(--dim);font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer}
+.reiter button.an{background:var(--card);color:var(--akz)}
+.reiter button .z{font-size:10px;opacity:.7;margin-left:3px}
+
+main{padding:12px 10px}
+
+/* ---------- Bausteine ---------- */
+.card{background:var(--panel);border:1px solid var(--lin);border-radius:10px;
+  padding:11px 12px;margin-bottom:8px}
+.btn{padding:10px 14px;background:var(--card);border:1px solid var(--lin);border-radius:9px;
+  color:var(--txt);font-size:12.5px;font-weight:700;cursor:pointer}
+.btn.haupt{background:var(--akz);color:#06202b;border-color:var(--akz)}
+.btn.warn{border-color:var(--rot);color:var(--rot)}
+.btn:disabled{opacity:.35;cursor:default}
+.reihe{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px}
+.tag{display:inline-block;padding:2px 7px;border-radius:5px;font-size:10px;
+  font-weight:700;text-transform:uppercase;letter-spacing:.04em;vertical-align:middle}
+.t-final{background:rgba(143,214,122,.16);color:var(--ok)}
+.t-offen{background:rgba(232,196,107,.16);color:var(--warn)}
+.t-verworfen{background:rgba(224,85,107,.16);color:var(--rot)}
+.t-referenz{background:rgba(180,140,232,.16);color:var(--lila)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:6px;margin-bottom:10px}
+.stat{background:var(--panel);border:1px solid var(--lin);border-radius:9px;
+  padding:9px 6px;text-align:center}
+.stat .n{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1}
+.stat .l{font-size:9.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+input[type=text],input[type=search],textarea,select{width:100%;padding:9px 11px;
+  background:var(--card);border:1px solid var(--lin);border-radius:8px;
+  color:var(--txt);font:inherit;font-size:13px}
+textarea{min-height:80px;resize:vertical}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--akz)}
+label.chk{display:flex;align-items:flex-start;gap:8px;font-size:12px;padding:5px 0;cursor:pointer}
+label.chk input{width:auto;flex:0 0 auto;margin-top:2px}
+
+/* Aufklappen */
+details.klapp{background:var(--panel);border:1px solid var(--lin);border-radius:10px;margin-bottom:8px}
+details.klapp>summary{padding:11px 12px;cursor:pointer;font-size:12.5px;font-weight:700;list-style:none}
+details.klapp>summary::-webkit-details-marker{display:none}
+details.klapp>summary::before{content:"▸ ";color:var(--akz)}
+details.klapp[open]>summary::before{content:"▾ "}
+details.klapp .inh{padding:0 12px 12px}
+
+/* Speicherzeile */
+.spz{padding:7px 10px;font-size:11px;border-bottom:1px solid var(--lin);
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.punkt{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.p-gruen{background:var(--ok)} .p-gelb{background:var(--warn)} .p-rot{background:var(--rot)}
+.spz .mini{padding:4px 8px;font-size:11px;background:var(--card);border:1px solid var(--lin);
+  border-radius:6px;color:var(--txt);cursor:pointer}
+
+/* Entscheidungen */
+.ent{border-left:2.5px solid var(--lin);background:var(--panel);border-radius:0 9px 9px 0;
+  padding:9px 11px;margin-bottom:6px}
+.ent.s-final{border-left-color:var(--ok)}
+.ent.s-offen{border-left-color:var(--warn)}
+.ent.s-verworfen{border-left-color:var(--rot)}
+.ent.s-referenz{border-left-color:var(--lila)}
+.ent .kopfz{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px}
+.ent .kid{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--akz)}
+.ent .dt{font-size:10px;color:var(--dim);margin-left:auto}
+.ent .tx{font-size:13px}
+.ent .gr{font-size:11.5px;color:var(--dim);margin-top:5px;padding-left:9px;
+  border-left:2px solid var(--lin)}
+.ent .qu{font-size:10px;color:var(--dim);margin-top:4px}
+
+/* Diff */
+.dz{font-family:ui-monospace,monospace;font-size:11px;padding:3px 7px;border-radius:4px;
+  margin:2px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.dz.del{background:rgba(224,85,107,.11);color:#f0a5b2}
+.dz.add{background:rgba(143,214,122,.11);color:#bde3ac}
+.gegen{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:7px 0}
+.gegen>div{background:var(--card);border:1px solid var(--lin);border-radius:8px;padding:8px 9px}
+.gegen h4{margin:0 0 5px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+.gegen .meta{font-size:10px;color:var(--dim);margin-bottom:5px}
+.gegen .inh{font-size:11.5px;max-height:120px;overflow:auto}
+@media(max-width:520px){.gegen{grid-template-columns:1fr}}
+.wahl{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
+.wahl button{flex:1;min-width:88px;padding:8px 6px;font-size:11.5px;font-weight:700;
+  background:var(--card);border:1px solid var(--lin);border-radius:7px;color:var(--dim);cursor:pointer}
+.wahl button.an{border-color:var(--akz);color:var(--akz);background:#17324a}
+.warnbox{border-color:var(--rot)!important}
+.warnzeile{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--rot);
+  font-weight:700;margin-bottom:6px}
+
+/* Liste */
+.zeile{display:flex;align-items:center;gap:8px;padding:9px 11px;background:var(--panel);
+  border:1px solid var(--lin);border-radius:9px;margin-bottom:5px;cursor:pointer}
+.zeile .nm{flex:1;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.zeile .kb{font-size:10px;color:var(--dim)}
+.md h3{font-size:14px;margin:14px 0 6px}
+.md p{margin:7px 0}
+.md table{width:100%;border-collapse:collapse;font-size:12px;margin:8px 0}
+.md th,.md td{border:1px solid var(--lin);padding:5px 7px;text-align:left}
+.md th{background:var(--card);color:var(--akz)}
+.md code{background:var(--card);padding:1px 5px;border-radius:4px;font-size:12px}
+.md pre{background:var(--card);padding:9px;border-radius:8px;overflow:auto;font-size:11.5px}
+.md ul,.md ol{padding-left:20px;margin:7px 0}
+.md li{margin:3px 0}
+.md hr{border:none;border-top:1px solid var(--lin);margin:13px 0}
+.md img{max-width:100%;border-radius:8px}
+
+/* Dialog */
+.dlg{position:fixed;inset:0;z-index:60;background:rgba(4,10,18,.82);
+  display:flex;align-items:flex-end;justify-content:center;padding:0}
+.dlg .box{background:var(--panel);border:1px solid var(--lin);border-radius:14px 14px 0 0;
+  width:100%;max-width:560px;max-height:88vh;overflow:auto;padding:16px 14px 20px}
+.dlg h3{margin:0 0 4px;font-size:15px}
+@media(min-width:620px){
+  body{max-width:600px;margin:0 auto}
+  .dlg{align-items:center}
+  .dlg .box{border-radius:14px}
+}
+.farbfeld{display:flex;gap:7px;flex-wrap:wrap;margin:6px 0}
+.farbfeld button{width:34px;height:34px;border-radius:9px;border:2px solid transparent;cursor:pointer}
+.farbfeld button.an{border-color:var(--txt)}
+:focus-visible{outline:2px solid var(--akz);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:80;
+  background:var(--akz);color:#06202b;padding:10px 18px;border-radius:9px;
+  font-weight:800;font-size:12.5px;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="kopf">
+    <div class="marke">Project<span>Tool</span> <span class="ver" id="verTxt">T20</span></div>
+    <button class="projbtn" id="btnProj">
+      <span class="pn" id="projName">kein Projekt</span>
+      <span class="pz" id="projZahl"></span>
+    </button>
+    <button class="menubtn" id="btnMenu">☰</button>
+  </div>
+  <div class="quick">
+    <input type="text" id="qIn" placeholder="Notiz, Frage mit ? oder Bug: …" autocomplete="off">
+    <button id="qBtn">Merken</button>
+  </div>
+  <div class="echo" id="echo"></div>
+  <div class="spz" id="spz"></div>
+  <div class="reiter" id="reiter"></div>
+</header>
+
+<main id="main"></main>
+
+<input type="file" id="fZip" accept=".zip" class="hidden">
+<input type="file" id="fOrd" webkitdirectory directory multiple class="hidden">
+<input type="file" id="fStand" accept=".json,application/json" class="hidden">
+
+<script>
+"use strict";
+const VERSION="T22", DATUM="2026-08-19";
+/* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
+   gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
+const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
+const ENC=new TextEncoder(), DEC=new TextDecoder("utf-8",{fatal:false});
+const TEXTEXT=["md","txt","json","js","css","html","py","gd","csv","svg","gdscript"];
+const BILDEXT=["png","jpg","jpeg","gif","webp","bmp"];
+const ENTPFAD="00_Entscheidungen/entscheidungen.json";
+const CFGPFAD="00_Config/config.json";
+const REGELPFAD="01_Regeln/00_ARBEITSWEISE.md";
+const STATUSLISTE=["final","offen","verworfen","referenz"];
+const RANG={final:3,verworfen:2,referenz:1,offen:0};
+const FARBEN=["#5eead4","#8fd67a","#e8c46b","#e0556b","#b48ce8","#6ba8e8","#e8916b","#8899aa"];
+const GESPERRT=["rok","jak","drome","killball","swarves","magskates","goalie","guard shell","glides"];
+
+let PROJ={}, CUR=null, PENDING=null, TOAST=null;
+let S={tab:"_start", datei:null, filter:"", entFilter:"alle", entSuche:""};
+let fh=null, autoAn=false, speicherKann=("showSaveFilePicker" in window);
+let fhFrage=false, dauerhaft=false, dauerKann=!!(navigator.storage&&navigator.storage.persist);
+let bereit=false;
+
+/* ================= Dauerspeicher (IndexedDB) =================
+   T22: alles liegt hier. Kein Laden mehr bei jedem Oeffnen.
+   Der Browser raeumt den Speicher einer Seite auf, wenn er als
+   wegwerfbar gilt — deshalb wird zuerst Dauerhaftigkeit angefordert. */
+const DBNAME="ProjectTool", DBVER=1;
+let DB=null;
+function dbOffen(){
+  return new Promise((res,rej)=>{
+    if(!("indexedDB" in window)) return rej(new Error("kein IndexedDB"));
+    const r=indexedDB.open(DBNAME,DBVER);
+    r.onupgradeneeded=()=>{ const d=r.result;
+      if(!d.objectStoreNames.contains("kv")) d.createObjectStore("kv");
+      if(!d.objectStoreNames.contains("dateien")) d.createObjectStore("dateien"); };
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+  });
+}
+function dbSetz(store,key,val){
+  return new Promise((res,rej)=>{ if(!DB) return res(false);
+    const t=DB.transaction(store,"readwrite");
+    t.objectStore(store).put(val,key);
+    t.oncomplete=()=>res(true); t.onerror=()=>rej(t.error); });
+}
+function dbHol(store,key){
+  return new Promise(res=>{ if(!DB) return res(null);
+    const t=DB.transaction(store,"readonly");
+    const r=t.objectStore(store).get(key);
+    r.onsuccess=()=>res(r.result==null?null:r.result); r.onerror=()=>res(null); });
+}
+function dbSchluessel(store){
+  return new Promise(res=>{ if(!DB) return res([]);
+    const t=DB.transaction(store,"readonly");
+    const r=t.objectStore(store).getAllKeys();
+    r.onsuccess=()=>res(r.result||[]); r.onerror=()=>res([]); });
+}
+function dbLoeschen(store,key){
+  return new Promise(res=>{ if(!DB) return res(false);
+    const t=DB.transaction(store,"readwrite");
+    t.objectStore(store).delete(key);
+    t.oncomplete=()=>res(true); t.onerror=()=>res(false); });
+}
+async function dauerPruefen(){
+  try{
+    if(navigator.storage&&navigator.storage.persisted) dauerhaft=await navigator.storage.persisted();
+    if(!dauerhaft&&navigator.storage&&navigator.storage.persist) dauerhaft=await navigator.storage.persist();
+  }catch(e){ dauerhaft=false; }
+  return dauerhaft;
+}
+async function dauerAnfordern(){
+  await dauerPruefen();
+  zeichne();
+  toast(dauerhaft?"Speicher ist dauerhaft":"Browser hat es abgelehnt");
+}
+
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const kb=n=>n<1024?n+" B":(n/1024).toFixed(n<10240?1:0)+" KB";
+/* Fix 6: blockweise. Der alte Spread mit Millionen Argumenten kippte bei
+   groesseren Bildern den Browser. */
+function b64Von(u8){
+  let s="";
+  for(let i=0;i<u8.length;i+=8192) s+=String.fromCharCode.apply(null,u8.subarray(i,i+8192));
+  return btoa(s);
+}
+const jetzt=()=>new Date().toISOString();
+const stamp=()=>{const d=new Date(),p=n=>String(n).padStart(2,"0");
+  return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"_"+p(d.getHours())+"-"+p(d.getMinutes());};
+const heute=()=>new Date().toISOString().slice(0,10);
+function toast(t){ if(TOAST)TOAST.remove();
+  TOAST=document.createElement("div"); TOAST.className="toast"; TOAST.textContent=t;
+  document.body.appendChild(TOAST); setTimeout(()=>{if(TOAST){TOAST.remove();TOAST=null;}},1900); }
+
+/* ================= ZIP ================= */
+async function unzip(buf){
+  const dv=new DataView(buf), u8=new Uint8Array(buf);
+  let eocd=-1;
+  for(let i=u8.length-22;i>=Math.max(0,u8.length-66000);i--)
+    if(dv.getUint32(i,true)===0x06054b50){eocd=i;break;}
+  if(eocd<0) throw new Error("Kein ZIP-Ende gefunden");
+  const anz=dv.getUint16(eocd+10,true); let off=dv.getUint32(eocd+16,true);
+  const out={};
+  for(let i=0;i<anz;i++){
+    if(dv.getUint32(off,true)!==0x02014b50) break;
+    const meth=dv.getUint16(off+10,true), csz=dv.getUint32(off+20,true),
+      usz=dv.getUint32(off+24,true), nl=dv.getUint16(off+28,true),
+      el=dv.getUint16(off+30,true), cl=dv.getUint16(off+32,true),
+      lho=dv.getUint32(off+42,true);
+    const name=DEC.decode(u8.subarray(off+46,off+46+nl));
+    const lnl=dv.getUint16(lho+26,true), lel=dv.getUint16(lho+28,true);
+    const ds=lho+30+lnl+lel;
+    let bytes;
+    if(meth===0) bytes=u8.slice(ds,ds+usz);
+    else{
+      const raw=u8.slice(ds,ds+csz);
+      const rs=new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate-raw")));
+      bytes=new Uint8Array(await rs.arrayBuffer());
+    }
+    if(!name.endsWith("/")) out[name]={bytes};
+    off+=46+nl+el+cl;
+  }
+  return out;
+}
+function crc32(u8){
+  let c, t=crc32.t;
+  if(!t){ t=crc32.t=[]; for(let n=0;n<256;n++){ c=n;
+    for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; t[n]=c>>>0; } }
+  let x=0xFFFFFFFF;
+  for(let i=0;i<u8.length;i++) x=(x>>>8)^t[(x^u8[i])&0xFF];
+  return (x^0xFFFFFFFF)>>>0;
+}
+async function zip(dateien){
+  const enc=[], teile=[]; let off=0;
+  for(const [name,u8] of dateien){
+    const nb=ENC.encode(name);
+    const cs=new Response(new Blob([u8]).stream().pipeThrough(new CompressionStream("deflate-raw")));
+    const comp=new Uint8Array(await cs.arrayBuffer());
+    const crc=crc32(u8);
+    const lh=new Uint8Array(30+nb.length), dv=new DataView(lh.buffer);
+    dv.setUint32(0,0x04034b50,true); dv.setUint16(4,20,true); dv.setUint16(6,0,true);
+    dv.setUint16(8,8,true); dv.setUint16(10,0,true); dv.setUint16(12,0,true);
+    dv.setUint32(14,crc,true); dv.setUint32(18,comp.length,true); dv.setUint32(22,u8.length,true);
+    dv.setUint16(26,nb.length,true); dv.setUint16(28,0,true);
+    lh.set(nb,30);
+    teile.push(lh,comp);
+    enc.push({nb,crc,csz:comp.length,usz:u8.length,off});
+    off+=lh.length+comp.length;
+  }
+  const cdT=[]; let cdLen=0;
+  for(const e of enc){
+    const ch=new Uint8Array(46+e.nb.length), dv=new DataView(ch.buffer);
+    dv.setUint32(0,0x02014b50,true); dv.setUint16(4,20,true); dv.setUint16(6,20,true);
+    dv.setUint16(8,0,true); dv.setUint16(10,8,true);
+    dv.setUint32(16,e.crc,true); dv.setUint32(20,e.csz,true); dv.setUint32(24,e.usz,true);
+    dv.setUint16(28,e.nb.length,true);
+    dv.setUint32(42,e.off,true);
+    ch.set(e.nb,46);
+    cdT.push(ch); cdLen+=ch.length;
+  }
+  const eo=new Uint8Array(22), dv2=new DataView(eo.buffer);
+  dv2.setUint32(0,0x06054b50,true); dv2.setUint16(8,enc.length,true);
+  dv2.setUint16(10,enc.length,true); dv2.setUint32(12,cdLen,true); dv2.setUint32(16,off,true);
+  return new Blob([...teile,...cdT,eo],{type:"application/zip"});
+}
+
+/* ================= Projektmodell ================= */
+function neuProjekt(name,dir){
+  return {name,dir:dir||("_Project_"+name),files:{},ent:null,entRoh:null,
+    config:{farbe:"#5eead4",export:null},meta:{},log:[],pakete:[],schnipsel:[],snapshots:[]};
+}
+function P(){ return PROJ[CUR]||null; }
+function istText(ext){ return TEXTEXT.includes(ext); }
+function dateiText(pr,rel){ const f=pr.files[rel]; return f&&f.text!=null?f.text:""; }
+function setzeDatei(pr,rel,text){
+  const ext=(rel.split(".").pop()||"").toLowerCase();
+  pr.files[rel]={bytes:ENC.encode(text),text,ext};
+}
+function entLesen(pr){
+  if(!pr.files[ENTPFAD]) return null;
+  try{ return JSON.parse(pr.files[ENTPFAD].text); }catch(e){ return null; }
+}
+/* Fix 9: die Farbe stand doppelt — einmal im Arbeitsstand, einmal in
+   00_Config/config.json. Ab jetzt ist die Datei die Quelle. */
+function configUebernehmen(pr){
+  const f=pr.files[CFGPFAD];
+  if(!f||f.text==null) return;
+  try{ const c=JSON.parse(f.text);
+    if(c.accent) pr.config.farbe=c.accent;
+  }catch(e){}
+}
+function configSchreiben(pr){
+  let c={};
+  const f=pr.files[CFGPFAD];
+  if(f&&f.text!=null){ try{ c=JSON.parse(f.text); }catch(e){ c={}; } }
+  c.accent=pr.config.farbe;
+  setzeDatei(pr,CFGPFAD,JSON.stringify(c,null,2));
+  pr.log.push({t:jetzt(),art:"geaendert",datei:CFGPFAD});
+}
+function entSchreiben(pr){
+  if(!pr.ent) return;
+  setzeDatei(pr,ENTPFAD,JSON.stringify(pr.ent,null,2));
+  sichern();
+}
+function bereiche(pr){
+  const m={};
+  Object.keys(pr.files).forEach(rel=>{
+    const t=rel.includes("/")?rel.split("/")[0]:"(Wurzel)";
+    if(!m[t])m[t]={n:0,b:0};
+    m[t].n++; m[t].b+=(pr.files[rel].bytes||[]).length||0;
+  });
+  return m;
+}
+
+/* ================= Laden ================= */
+async function ladeEintraege(entries,istPatch){
+  const alle=Object.keys(entries).filter(k=>!k.startsWith("__MACOSX")&&!k.endsWith(".DS_Store"));
+  if(!alle.length){ alert("Das Paket ist leer."); return; }
+  const mkeys=alle.filter(k=>/(^|\/)manifest(_[^/]+)?\.json$/.test(k)).sort((a,b)=>a.length-b.length);
+  let basis="";
+  if(mkeys.length) basis=mkeys[0].replace(/[^/]+$/,"");
+  else{
+    const teile=alle[0].split("/");
+    const iP=teile.findIndex(t=>/^_?[Pp]roject_/.test(t));
+    if(iP>0) basis=teile.slice(0,iP).join("/")+"/";
+    else if(teile.length>2) basis=teile[0]+"/";
+  }
+  const neu=[],geaendert=[],gleich=[],ablage=[],projekte=new Set();
+  let entNeu=null, entProj=null;
+
+  for(const pfad of alle){
+    if(/(^|\/)ProjectTool\.html$/i.test(pfad)) continue;
+    let rest = basis && pfad.startsWith(basis) ? pfad.slice(basis.length) : pfad;
+    if(!rest.includes("/")){ ablage.push(rest); continue; }
+    const top=rest.split("/")[0], rel=rest.slice(top.length+1);
+    if(/^(zips|arbeitst|berichte)/i.test(top)){ ablage.push(rest); continue; }
+    let pname = /^_?[Pp]roject_/.test(top) ? top.replace(/^_?[Pp]roject_/,"") : top;
+    projekte.add(pname);
+    if(!PROJ[pname]) PROJ[pname]=neuProjekt(pname,top);
+    const pr=PROJ[pname];
+    const ext=(rel.split(".").pop()||"").toLowerCase();
+    const bytes=entries[pfad].bytes;
+    const rec={bytes,ext};
+    if(istText(ext)) rec.text=DEC.decode(bytes);
+
+    if(rel===ENTPFAD){
+      try{ entNeu=JSON.parse(rec.text); entProj=pname; }catch(e){ }
+      continue;                                    // laeuft ueber den Aussagen-Merge
+    }
+    const alt=pr.files[rel];
+    if(!alt) neu.push({proj:pname,rel,rec});
+    else if(rec.text!=null && alt.text===rec.text) gleich.push({proj:pname,rel});
+    else if(rec.text==null && alt.bytes && alt.bytes.length===bytes.length) gleich.push({proj:pname,rel});
+    else geaendert.push({proj:pname,rel,rec,alt});
+  }
+  if(!projekte.size){
+    alert("Im Paket war keine Projektdatei zu finden.\n\n"+
+      "Erwartet wird ein Ordner \"Projects\" mit einem Unterordner _Project_NAME. "+
+      "Wenn du den Ordner gewaehlt hast: nimm stattdessen \"ZIP laden\".");
+    return; }
+  if(!CUR||!projekte.has(CUR)) CUR=[...projekte][0];
+
+  /* Entscheidungen pro Aussage vergleichen */
+  let entDiff=null;
+  if(entNeu && entNeu.eintraege){
+    const pr=PROJ[entProj]||P();
+    const alt=pr.ent;
+    if(!alt){
+      entDiff={proj:entProj,neu:entNeu.eintraege.map(e=>({e,art:"neu",wahl:"neu"})),roh:entNeu};
+    }else{
+      const altMap={}; alt.eintraege.forEach(e=>altMap[e.id]=e);
+      const liste=[];
+      entNeu.eintraege.forEach(e=>{
+        const a=altMap[e.id];
+        if(!a){ liste.push({e,art:"neu",wahl:"neu"}); return; }
+        if(a.text===e.text && a.status===e.status && a.datum===e.datum) return;
+        const rueck = (RANG[e.status]||0) < (RANG[a.status]||0) || (e.datum||"") < (a.datum||"");
+        liste.push({e,alt:a,art:"geaendert",rueck,wahl:rueck?"alt":"neu"});
+      });
+      if(liste.length) entDiff={proj:entProj,neu:liste,roh:entNeu};
+    }
+  }
+  PENDING={neu,geaendert,gleich,ablage,entDiff,projekte:[...projekte],patch:!!istPatch};
+  S.tab="_merge"; S.datei=null;
+  zeichne();
+}
+async function ladeZip(file){
+  try{ await ladeEintraege(await unzip(await file.arrayBuffer()),true); }
+  catch(e){ alert("Konnte nicht gelesen werden:\n"+e.message); }
+}
+async function ladeOrdner(fileList){
+  /* Fix 1: manche Browser (vor allem am Handy) liefern beim Ordnerwaehlen
+     keinen webkitRelativePath. Dann sind alle Pfade flach und es kaeme nur
+     "keine Projektdatei". Lieber vorher sagen und das ZIP anbieten. */
+  let mitPfad=0;
+  for(const f of fileList) if(f.webkitRelativePath && f.webkitRelativePath.includes("/")) mitPfad++;
+  if(!mitPfad){
+    alert("Dein Browser hat "+fileList.length+" Dateien ohne Ordnerpfade geliefert.\n\n"+
+      "So laesst sich das Projekt nicht aufbauen. Nimm stattdessen \"ZIP laden\" "+
+      "und waehle die Paketdatei — das funktioniert auf jedem Geraet.");
+    return;
+  }
+  const entries={};
+  for(const f of fileList){
+    const p=f.webkitRelativePath||f.name;
+    if(/(^|\/)(node_modules|\.git)\//.test(p)) continue;
+    entries[p]={bytes:new Uint8Array(await f.arrayBuffer())};
+  }
+  await ladeEintraege(entries,false);
+}
+
+/* ================= Merge anwenden ================= */
+function mergeAnwenden(dateiWahl,entWahl){
+  const pr0=P();
+  PENDING.neu.forEach((x,i)=>{
+    if(dateiWahl.neu[i]===false) return;
+    const pr=PROJ[x.proj]; pr.files[x.rel]=x.rec;
+    pr.log.push({t:jetzt(),art:"neu",datei:x.rel});
+  });
+  PENDING.geaendert.forEach((x,i)=>{
+    const w=dateiWahl.ge[i];
+    if(w==="alt") return;
+    const pr=PROJ[x.proj];
+    if(w==="beide"){
+      const bak=x.rel.replace(/(\.[^./]+)?$/,m=>"_meine_"+stamp()+(m||""));
+      pr.files[bak]={bytes:x.alt.bytes,text:x.alt.text,ext:x.alt.ext};
+      pr.log.push({t:jetzt(),art:"gesichert",datei:bak});
+    }
+    pr.files[x.rel]=x.rec;
+    pr.log.push({t:jetzt(),art:"geaendert",datei:x.rel});
+  });
+  if(PENDING.entDiff){
+    const pr=PROJ[PENDING.entDiff.proj]||pr0;
+    if(!pr.ent) pr.ent={schema:1,projekt:pr.name,erzeugt:heute(),
+      hinweis:PENDING.entDiff.roh.hinweis||"",eintraege:[]};
+    const map={}; pr.ent.eintraege.forEach(e=>map[e.id]=e);
+    PENDING.entDiff.neu.forEach((it,i)=>{
+      const w=entWahl[i];
+      if(w==="alt") return;
+      if(w==="beide" && it.alt){
+        const kopie=JSON.parse(JSON.stringify(it.alt));
+        kopie.id=it.alt.id+".alt_"+stamp();
+        kopie.status="referenz";
+        map[kopie.id]=kopie;
+        pr.ent.eintraege.push(kopie);
+      }
+      if(map[it.e.id]){
+        const idx=pr.ent.eintraege.findIndex(x=>x.id===it.e.id);
+        pr.ent.eintraege[idx]=it.e;
+      }else pr.ent.eintraege.push(it.e);
+      map[it.e.id]=it.e;
+    });
+    entSchreiben(pr);
+  }
+  PENDING.projekte.forEach(pn=>{
+    const pr=PROJ[pn];
+    if(!pr.ent) pr.ent=entLesen(pr);
+    pr.pakete.push({when:jetzt(),patch:PENDING.patch});
+    indexBauen(pr);
+  });
+  PENDING=null; S.tab="_start";
+  sichern(); zeichne(); toast("Übernommen");
+}
+
+/* ================= index.json ================= */
+function indexBauen(pr){
+  const idx={erzeugt:jetzt(),dateien:{}};
+  Object.keys(pr.files).sort().forEach(rel=>{
+    const f=pr.files[rel];
+    idx.dateien[rel]={bytes:(f.bytes||[]).length||0,pruef:crc32(f.bytes||new Uint8Array(0))};
+  });
+  setzeDatei(pr,"index.json",JSON.stringify(idx,null,1));
+}
+
+/* ================= Speichern ================= */
+function standObjekt(){
+  const o={version:VERSION,gesichert:jetzt(),cur:CUR,tab:S.tab,projekte:{}};
+  Object.keys(PROJ).forEach(n=>{
+    const pr=PROJ[n];
+    o.projekte[n]={config:pr.config,meta:pr.meta,log:pr.log.slice(-400),
+      schnipsel:pr.schnipsel,dir:pr.dir};
+  });
+  return o;
+}
+function standZurueck(o){
+  if(!o||!o.projekte) return;
+  Object.keys(o.projekte).forEach(n=>{
+    const q=o.projekte[n];
+    /* Fix 4: fehlt das Projekt noch (Seite frisch geladen, keine Dateien),
+       wird eine Huelle angelegt. Notizen, Bugs und Verlauf sind damit
+       sofort wieder da, die Dateien kommen beim naechsten Laden dazu. */
+    if(!PROJ[n]) PROJ[n]=neuProjekt(n,q.dir);
+    PROJ[n].config=q.config||PROJ[n].config;
+    PROJ[n].meta=q.meta||{};
+    PROJ[n].log=q.log||[];
+    PROJ[n].schnipsel=q.schnipsel||[];
+  });
+}
+/* T22: sichern() schreibt sofort in IndexedDB. Die Projektdateien und die
+   Sicherungsdatei laufen gebuendelt hinterher, damit haeufige kleine
+   Aenderungen nicht jedes Mal Megabytes bewegen. */
+let datTimer=null, fileTimer=null;
+async function sichern(){
+  if(!bereit) return;
+  const st=standObjekt();
+  try{ await dbSetz("kv","stand",st); }catch(e){}
+  try{ localStorage.setItem("pt_stand",JSON.stringify(st)); }catch(e){}
+  planeDateien(); planeDatei();
+  const el=$("#spzZeit"); if(el) el.textContent=new Date().toLocaleTimeString().slice(0,5);
+}
+function planeDateien(){ clearTimeout(datTimer); datTimer=setTimeout(dateienSichern,1200); }
+async function dateienSichern(){
+  if(!DB) return;
+  for(const n of Object.keys(PROJ)){
+    const pr=PROJ[n];
+    if(!Object.keys(pr.files).length) continue;
+    const f={};
+    Object.keys(pr.files).forEach(rel=>{ const x=pr.files[rel];
+      f[rel]={bytes:x.bytes||null,text:x.text==null?null:x.text,ext:x.ext}; });
+    try{ await dbSetz("dateien",n,{dir:pr.dir,files:f,gesichert:jetzt()}); }catch(e){}
+  }
+}
+function planeDatei(){ if(!(fh&&autoAn)) return; clearTimeout(fileTimer); fileTimer=setTimeout(dateiSchreiben,2500); }
+async function dateiSchreiben(){
+  if(!(fh&&autoAn)) return;
+  try{ const w=await fh.createWritable();
+    await w.write(JSON.stringify(standObjekt(),null,1)); await w.close();
+  }catch(e){ autoAn=false; fhFrage=true; zeichneSpz(); }
+}
+async function dateiWaehlen(){
+  if(!speicherKann){ alert("Dieser Browser kann nicht direkt in Dateien schreiben."); return; }
+  try{
+    fh=await showSaveFilePicker({suggestedName:"ProjectTool_Sicherung.json",
+      types:[{description:"Sicherung",accept:{"application/json":[".json"]}}]});
+    autoAn=true; fhFrage=false;
+    try{ await dbSetz("kv","fh",fh); }catch(e){}
+    await sichern(); await dateiSchreiben(); zeichne(); toast("Sicherung laeuft automatisch");
+  }catch(e){}
+}
+/* Der Zugriff auf eine gemerkte Datei muss nach einem Neustart einmal
+   bestaetigt werden — das verlangt der Browser, nicht das Tool. */
+async function fhErlauben(){
+  if(!fh) return dateiWaehlen();
+  try{ const p=await fh.requestPermission({mode:"readwrite"});
+    if(p==="granted"){ autoAn=true; fhFrage=false; await dateiSchreiben(); zeichne(); toast("Sicherung laeuft wieder"); }
+  }catch(e){}
+}
+async function fhPruefen(){
+  if(!speicherKann) return;
+  let h=null; try{ h=await dbHol("kv","fh"); }catch(e){}
+  if(!h) return;
+  fh=h;
+  try{ const p=await h.queryPermission({mode:"readwrite"});
+    if(p==="granted"){ autoAn=true; fhFrage=false; } else { autoAn=false; fhFrage=true; }
+  }catch(e){ autoAn=false; fhFrage=true; }
+}
+async function speicherVergessen(){
+  if(!confirm("Alles aus dem Browserspeicher entfernen? Projektdateien, Notizen und Verlauf sind dann weg.")) return;
+  try{ for(const k of await dbSchluessel("dateien")) await dbLoeschen("dateien",k);
+       await dbLoeschen("kv","stand"); await dbLoeschen("kv","fh"); }catch(e){}
+  try{ localStorage.removeItem("pt_stand"); }catch(e){}
+  location.reload();
+}
+/* Fix 5: Rueckfall fuer Browser ohne Dateizugriff (Handy). Der Stand laesst
+   sich als Datei herunterladen und spaeter wieder einlesen. */
+function standSichernAlsDatei(){
+  const b=new Blob([JSON.stringify(standObjekt(),null,1)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(b);
+  a.download="ProjectTool_Arbeitsstand_"+stamp()+".json";
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  toast("Arbeitsstand gesichert");
+}
+async function standAusDatei(file){
+  try{ standZurueck(JSON.parse(await file.text())); sichern(); zeichne(); toast("Arbeitsstand geladen"); }
+  catch(e){ alert("Diese Datei konnte nicht gelesen werden."); }
+}
+async function standLaden(){
+  try{
+    const [h]=await showOpenFilePicker({types:[{description:"Arbeitsstand",accept:{"application/json":[".json"]}}]});
+    const f=await h.getFile();
+    standZurueck(JSON.parse(await f.text()));
+    fh=h; autoAn=true; zeichne(); toast("Arbeitsstand geladen");
+  }catch(e){}
+}
+
+/* ================= Export ================= */
+function exportAuswahl(pr){
+  const b=bereiche(pr);
+  const gespeichert=(pr.config&&pr.config.export)||null;
+  const aus={};
+  Object.keys(b).forEach(k=>{
+    aus[k]= gespeichert ? !!gespeichert[k] : !/^(11_Altbestand|_Archiv)/i.test(k) && !k.startsWith("(");
+  });
+  /* Fix 8: zusaetzlich nach Dateiart, damit die schweren Brocken
+     (SVG, ZIP, PDF) einzeln abwaehlbar sind. SVG ist von Haus aus aus. */
+  const t={};
+  Object.keys(pr.files).forEach(rel=>{
+    const e=(rel.split(".").pop()||"?").toLowerCase();
+    if(!t[e]) t[e]={n:0,b:0};
+    t[e].n++; t[e].b+=(pr.files[rel].bytes||[]).length||0;
+  });
+  const gesT=(pr.config&&pr.config.exportTyp)||null;
+  const ausT={};
+  Object.keys(t).forEach(e=>{ ausT[e]= gesT ? !!gesT[e] : !/^(svg|zip)$/.test(e); });
+  return {b,aus,t,ausT};
+}
+async function exportieren(aus,name,ausT){
+  const pr=P(); if(!pr) return;
+  indexBauen(pr);
+  const dateien=[];
+  const toolQ=TOOLQUELLE;
+  Object.keys(pr.files).sort().forEach(rel=>{
+    const top=rel.includes("/")?rel.split("/")[0]:"(Wurzel)";
+    if(aus && aus[top]===false) return;
+    const ex=(rel.split(".").pop()||"?").toLowerCase();
+    if(ausT && ausT[ex]===false && rel!==ENTPFAD && rel!==CFGPFAD && rel!==REGELPFAD) return;
+    dateien.push(["Projects/"+pr.dir+"/"+rel,pr.files[rel].bytes]);
+  });
+  dateien.push(["Projects/ProjectTool.html",ENC.encode(toolQ)]);
+  dateien.push(["Projects/manifest_"+pr.name+".json",
+    ENC.encode(JSON.stringify({project:pr.name,dir:pr.dir,version:VERSION},null,1))]);
+  const blob=await zip(dateien);
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=(name||pr.name)+"_"+stamp()+".zip";
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  toast("Export läuft");
+}
+
+/* ================= Bericht ================= */
+function berichtText(){
+  const pr=P(); if(!pr) return "";
+  let s="# Bericht für Claude — "+pr.name+"\nerzeugt: "+jetzt()+"\nTool: "+VERSION+"\n\n";
+  const ent=pr.ent&&pr.ent.eintraege||[];
+  const offen=ent.filter(e=>e.status==="offen");
+  s+="## Offene Entscheidungen ("+offen.length+")\n";
+  offen.forEach(e=>{ s+="- ["+e.id+"] "+e.text+"\n"; });
+  const fragen=pr.schnipsel.filter(x=>x.art==="frage");
+  const bugs=pr.schnipsel.filter(x=>x.art==="bug");
+  const notizen=pr.schnipsel.filter(x=>x.art==="notiz");
+  s+="\n## Fragen ("+fragen.length+")\n"; fragen.forEach(x=>s+="- "+x.text+"  ("+x.t.slice(0,16).replace("T"," ")+")\n");
+  s+="\n## Bugs ("+bugs.length+")\n"; bugs.forEach(x=>s+="- "+x.text+"  ("+x.t.slice(0,16).replace("T"," ")+")\n");
+  s+="\n## Notizen ("+notizen.length+")\n"; notizen.forEach(x=>s+="- "+x.text+"  ("+x.t.slice(0,16).replace("T"," ")+")\n");
+  const w=waechter(pr);
+  s+="\n## Wächter ("+w.length+")\n"; w.slice(0,40).forEach(x=>s+="- "+x.rel+": "+x.was+"\n");
+  s+="\n## Änderungen zuletzt\n";
+  pr.log.slice(-30).forEach(l=>s+="- "+l.t.slice(0,16).replace("T"," ")+" "+l.art+" "+l.datei+"\n");
+  s+="\n## Bestand\n"+Object.keys(pr.files).length+" Dateien, "+ent.length+" Entscheidungen.\n";
+  return s;
+}
+function waechter(pr){
+  const tr=[];
+  Object.keys(pr.files).forEach(rel=>{
+    /* Archiv, Referenz und Dokumente duerfen die alten Begriffe tragen.
+       Ebenso die Begriffstabelle, Hinweisdateien, Sessions, Fehlerlisten und
+       die Entscheidungsdatei — dort STEHT drin, was gesperrt ist. */
+    if(/^(11_Altbestand|_Archiv|03_Referenz|13_Dokumente|00_Entscheidungen|08_Sessions|05_Bugs)/i.test(rel)) return;
+    if(/(^|\/)(begriffe|_HINWEIS|_Kernfakten|_Weltenbibel)/i.test(rel)) return;
+    const f=pr.files[rel];
+    if(!f.text) return;
+    const zeilen=f.text.split(/\r?\n/);
+    const entwarnung=/gesperrt|ersetzt|nicht mehr|statt|banned|früher|frueher|verworfen|\bALT\b/i;
+    zeilen.forEach((z,i)=>{
+      /* Auch die Vorzeile zaehlt: eine umgebrochene Aufzaehlung gesperrter
+         Begriffe soll keinen Fehlalarm geben. */
+      if(entwarnung.test(z)) return;
+      if(i>0 && entwarnung.test(zeilen[i-1]) && /^[\s-]*[A-ZÄÖÜ]/.test(z)) return;
+      if(/^\s*\|/.test(z)) return;   // Tabellenzeilen: dort stehen Gegenueberstellungen
+      GESPERRT.forEach(g=>{
+        if(new RegExp("(^|[^a-zäöüß])"+g+"([^a-zäöüß]|$)","i").test(z))
+          tr.push({rel,zeile:i+1,was:"gesperrter Begriff \""+g+"\""});
+      });
+    });
+  });
+  return tr;
+}
+
+/* ================= Markdown ================= */
+function md(src){
+  const L=String(src||"").split(/\r?\n/), out=[];
+  let i=0;
+  const inl=t=>esc(t).replace(/`([^`]+)`/g,"<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>")
+    .replace(/(^|\s)\*([^*\n]+)\*/g,"$1<i>$2</i>");
+  while(i<L.length){
+    const l=L[i];
+    if(/^```/.test(l)){ const b=[]; i++;
+      while(i<L.length&&!/^```/.test(L[i])) b.push(L[i++]); i++;
+      out.push("<pre>"+esc(b.join("\n"))+"</pre>"); continue; }
+    if(/^\s*\|.*\|\s*$/.test(l)&&i+1<L.length&&/^\s*\|[\s:|-]+\|\s*$/.test(L[i+1])){
+      const zl=r=>r.trim().replace(/^\||\|$/g,"").split("|").map(c=>c.trim());
+      let h="<table><thead><tr>"+zl(l).map(c=>"<th>"+inl(c)+"</th>").join("")+"</tr></thead><tbody>";
+      i+=2;
+      while(i<L.length&&/^\s*\|.*\|\s*$/.test(L[i])){
+        h+="<tr>"+zl(L[i]).map(c=>"<td>"+inl(c)+"</td>").join("")+"</tr>"; i++; }
+      out.push(h+"</tbody></table>"); continue; }
+    let m=l.match(/^(#{1,6})\s+(.*)$/);
+    if(m){ const n=Math.min(m[1].length+1,6); out.push("<h"+n+">"+inl(m[2])+"</h"+n+">"); i++; continue; }
+    if(/^\s*([-*])\s+/.test(l)){
+      let h="<ul>";
+      while(i<L.length&&/^\s*([-*])\s+/.test(L[i])){ h+="<li>"+inl(L[i].replace(/^\s*[-*]\s+/,""))+"</li>"; i++; }
+      out.push(h+"</ul>"); continue; }
+    if(/^\s*\d+[.)]\s+/.test(l)){
+      let h="<ol>";
+      while(i<L.length&&/^\s*\d+[.)]\s+/.test(L[i])){ h+="<li>"+inl(L[i].replace(/^\s*\d+[.)]\s+/,""))+"</li>"; i++; }
+      out.push(h+"</ol>"); continue; }
+    if(/^\s*(---+|___+)\s*$/.test(l)){ out.push("<hr>"); i++; continue; }
+    if(!l.trim()){ i++; continue; }
+    const p=[];
+    while(i<L.length&&L[i].trim()&&!/^(#{1,6}\s|\s*[-*]\s|\s*\d+[.)]\s|```|\s*\|)/.test(L[i])) p.push(L[i++]);
+    out.push("<p>"+inl(p.join(" "))+"</p>");
+  }
+  return out.join("\n");
+}
+
+/* ================= Ansichten ================= */
+function zeichneSpz(){
+  const el=$("#spz");
+  /* T22: die Zeile zeigt den Speicher, nicht mehr eine Dateiwahl.
+     Gruen heisst: alles liegt dauerhaft im Geraet, nichts ist zu tun. */
+  const kl=!DB?"p-rot":(dauerhaft?"p-gruen":"p-gelb");
+  const tx=!DB?"Kein Dauerspeicher — Browser lässt ihn nicht zu"
+    :(dauerhaft?"Gespeichert, dauerhaft":"Gespeichert, aber nicht gegen Aufräumen gesichert");
+  el.innerHTML='<span class="punkt '+kl+'"></span><span>'+tx+'</span>'+
+    ' <span class="dim" id="spzZeit"></span>'+
+    (fhFrage?'<button class="mini" id="spzErl" style="margin-left:auto">Sicherung fortsetzen</button>':"")+
+    '<button class="mini" id="spzSichern" style="margin-left:'+(fhFrage?"0":"auto")+'">Ausgeben</button>';
+  const c=$("#spzSichern"), e2=$("#spzErl");
+  if(c) c.onclick=standSichernAlsDatei;
+  if(e2) e2.onclick=fhErlauben;
+}
+const TABS=[
+  ["_start","Start"],["_ent","Entscheidungen"],["_dateien","Dateien"],["_meins","Meins"],
+  ["_waechter","Wächter"],["_bericht","Bericht"],["_neu","Was ist neu"],["_config","Config"]
+];
+function zeichneReiter(){
+  const pr=P();
+  $("#reiter").innerHTML=TABS.map(([id,t])=>{
+    let z="";
+    if(pr){
+      if(id==="_ent"&&pr.ent) z=(pr.ent.eintraege||[]).filter(e=>e.status==="offen").length||"";
+      if(id==="_dateien") z=Object.keys(pr.files).length;
+      if(id==="_meins") z=pr.schnipsel.length||"";
+      if(id==="_waechter") z=waechter(pr).length||"";
+    }
+    return '<button data-tab="'+id+'" class="'+(S.tab===id?"an":"")+'">'+t+
+      (z?'<span class="z">'+z+'</span>':"")+'</button>';
+  }).join("")+(PENDING?'<button data-tab="_merge" class="'+(S.tab==="_merge"?"an":"")+'" style="color:var(--warn)">Änderungen</button>':"");
+  $("#reiter").querySelectorAll("button").forEach(b=>b.onclick=()=>{S.tab=b.dataset.tab;S.datei=null;zeichne();});
+}
+
+/* T22: Startbildschirm erklaert, was noch fehlt, und laesst es gleich
+   erledigen. Erledigte Zeilen verschwinden. Ist alles erledigt,
+   verschwindet der ganze Block. */
+function zeile(fertig,titel,text,knoepfe){
+  return `<div class="card" style="border-color:${fertig?"var(--ok)":"var(--warn)"}">
+    <b style="color:${fertig?"var(--ok)":"var(--warn)"}">${fertig?"✓ ":"" }${titel}</b>
+    <div class="dim" style="font-size:11.5px;margin-top:3px">${text}</div>
+    ${knoepfe?`<div class="reihe" style="margin:8px 0 0">${knoepfe}</div>`:""}</div>`;
+}
+function vLadeliste(){
+  const pr=P();
+  const hatDateien=!!(pr&&Object.keys(pr.files).length);
+  let h="";
+  if(!hatDateien) h+=zeile(false,"Projektdateien fehlen",
+    "Einmal das Paket einlesen. Danach bleibt es im Gerät — bei jedem Öffnen sofort da.",
+    `<button class="btn haupt" onclick="document.getElementById('fZip').click()">ZIP laden</button>
+     <button class="btn" onclick="document.getElementById('fOrd').click()">Ordner wählen</button>`);
+  if(DB&&!dauerhaft) h+=zeile(false,"Speicher nicht gegen Aufräumen gesichert",
+    "Der Browser darf den Speicher dieser Seite bei Platzmangel leeren. Einmal erlauben, dann nicht mehr.",
+    `<button class="btn" onclick="dauerAnfordern()">Dauerhaft erlauben</button>`);
+  if(!DB) h+=zeile(false,"Kein Dauerspeicher",
+    "Dieser Browser gibt keinen dauerhaften Speicher her — vermutlich privates Fenster. Der Stand geht beim Schließen verloren.","");
+  if(speicherKann&&fhFrage) h+=zeile(false,"Sicherungsdatei bestätigen",
+    "Die Datei ist gemerkt, der Browser will den Schreibzugriff nach dem Neustart einmal bestätigt haben.",
+    `<button class="btn" onclick="fhErlauben()">Fortsetzen</button>`);
+  if(speicherKann&&!fh) h+=zeile(false,"Automatische Sicherung aus",
+    "Einmal eine Datei wählen, danach schreibt das Tool selbst hinein. Nur für den Umzug auf ein anderes Gerät nötig.",
+    `<button class="btn" onclick="dateiWaehlen()">Datei wählen</button>`);
+  return h;
+}
+function vStart(){
+  const pr=P();
+  const lade=vLadeliste();
+  if(!pr) return `<div class="card"><h1>Willkommen</h1>
+    <p class="dim">Erst einmal einlesen, danach bleibt alles im Gerät.</p></div>`+lade;
+  const ent=(pr.ent&&pr.ent.eintraege)||[];
+  const z=k=>ent.filter(e=>e.status===k).length;
+  const offen=ent.filter(e=>e.status==="offen");
+  let h=`<div class="grid">
+    <div class="stat"><div class="n" style="color:var(--ok)">${z("final")}</div><div class="l">final</div></div>
+    <div class="stat"><div class="n" style="color:var(--warn)">${z("offen")}</div><div class="l">offen</div></div>
+    <div class="stat"><div class="n">${Object.keys(pr.files).length}</div><div class="l">Dateien</div></div>
+    <div class="stat"><div class="n">${pr.schnipsel.length}</div><div class="l">Meins</div></div>
+  </div>`;
+  h+=lade;
+  if(pr.files[REGELPFAD]) h+=`<div class="card" style="border-color:var(--akz)">
+    <b style="color:var(--akz)">Arbeitsweise</b>
+    <div class="dim" style="font-size:11.5px">Die verbindlichen Regeln für die Zusammenarbeit stehen in ${REGELPFAD}.
+    Claude liest sie zu Session-Beginn als Erstes.</div>
+    <div class="reihe" style="margin:7px 0 0"><button class="btn" data-datei="${REGELPFAD}" style="font-size:11.5px;padding:7px 10px">Regeln öffnen</button></div></div>`;
+  if(!pr.ent) h+=`<div class="card" style="border-color:var(--warn)">
+    <b style="color:var(--warn)">Keine Entscheidungsdatei</b>
+    <div class="dim" style="font-size:11.5px">In diesem Projekt fehlt ${ENTPFAD}. Ohne sie gibt es keinen verbindlichen Stand.</div></div>`;
+  h+=`<h2>Das steht an</h2>`;
+  if(!offen.length) h+=`<div class="card dim">Nichts offen.</div>`;
+  offen.slice(0,8).forEach(e=>{
+    h+=`<div class="ent s-offen"><div class="kopfz"><span class="kid">${esc(e.id)}</span>
+      <span class="tag t-offen">offen</span><span class="dt">${esc(e.datum||"")}</span></div>
+      <div class="tx">${esc(e.text)}</div></div>`;
+  });
+  if(offen.length>8) h+=`<div class="card dim" style="font-size:12px">… und ${offen.length-8} weitere unter Entscheidungen.</div>`;
+  h+=`<h2>Zuletzt geändert</h2>`;
+  if(!pr.log.length) h+=`<div class="card dim">Noch nichts.</div>`;
+  else pr.log.slice(-6).reverse().forEach(l=>{
+    h+=`<div class="zeile"><span class="nm">${esc(l.datei)}</span><span class="kb">${esc(l.art)}</span></div>`;});
+  return h;
+}
+
+function vEnt(){
+  const pr=P(); if(!pr) return '<div class="card dim">Kein Projekt.</div>';
+  if(!pr.ent) return `<div class="card"><b>Keine Entscheidungsdatei</b>
+    <p class="dim">Erwartet wird ${ENTPFAD}. Sie ist die Wahrheit des Projekts — alle anderen Dateien sind abgeleitet.</p></div>`;
+  const alle=pr.ent.eintraege||[];
+  const bs=[...new Set(alle.map(e=>e.bereich))];
+  let liste=alle;
+  if(S.entFilter!=="alle"){
+    liste=STATUSLISTE.includes(S.entFilter)?alle.filter(e=>e.status===S.entFilter):alle.filter(e=>e.bereich===S.entFilter);
+  }
+  if(S.entSuche){
+    const q=S.entSuche.toLowerCase();
+    liste=liste.filter(e=>(e.id+" "+e.text+" "+(e.grund||"")).toLowerCase().includes(q));
+  }
+  let h=`<input type="search" id="entS" placeholder="Suchen…" value="${esc(S.entSuche)}" style="margin-bottom:8px">
+    <div class="reihe">`;
+  h+=`<button class="btn ${S.entFilter==="alle"?"haupt":""}" data-f="alle">Alle ${alle.length}</button>`;
+  STATUSLISTE.forEach(s=>{
+    const n=alle.filter(e=>e.status===s).length; if(!n) return;
+    h+=`<button class="btn ${S.entFilter===s?"haupt":""}" data-f="${s}">${s} ${n}</button>`;});
+  h+=`</div><div class="reihe">`;
+  bs.forEach(b=>{ h+=`<button class="btn ${S.entFilter===b?"haupt":""}" data-f="${esc(b)}" style="font-size:11.5px;padding:7px 10px">${esc(b)}</button>`;});
+  h+=`</div>`;
+  if(!liste.length) h+=`<div class="card dim">Nichts gefunden.</div>`;
+  liste.forEach(e=>{
+    h+=`<div class="ent s-${e.status}"><div class="kopfz">
+      <span class="kid">${esc(e.id)}</span><span class="tag t-${e.status}">${e.status}</span>
+      <span class="dt">${esc(e.datum||"")}</span></div>
+      <div class="tx">${esc(e.text)}</div>
+      ${e.ersetzt?`<div class="qu">ersetzt: ${esc(e.ersetzt)}</div>`:""}
+      ${e.grund?`<div class="gr">${esc(e.grund)}</div>`:""}
+      <div class="qu">${esc(e.bereich)} · ${esc(e.quelle||"")}</div>
+      <div class="reihe" style="margin:7px 0 0">
+        <button class="btn" data-entkomm="${esc(e.id)}" style="font-size:11px;padding:6px 10px">Dazu sagen</button>
+      </div></div>`;
+  });
+  return h;
+}
+
+function vDateien(){
+  const pr=P(); if(!pr) return '<div class="card dim">Kein Projekt.</div>';
+  if(S.datei!==null) return vDatei();
+  const b=bereiche(pr);
+  const q=(S.filter||"").toLowerCase();
+  let h=`<input type="search" id="datS" placeholder="Datei suchen…" value="${esc(S.filter)}" style="margin-bottom:9px">`;
+  Object.keys(b).sort().forEach(top=>{
+    const drin=Object.keys(pr.files).filter(r=>(r.includes("/")?r.split("/")[0]:"(Wurzel)")===top)
+      .filter(r=>!q||r.toLowerCase().includes(q)).sort();
+    if(!drin.length) return;
+    h+=`<details class="klapp" ${q?"open":""}><summary>${esc(top)} <span class="dim">${drin.length} · ${kb(b[top].b)}</span></summary><div class="inh">`;
+    drin.forEach(rel=>{
+      const f=pr.files[rel];
+      h+=`<div class="zeile" data-datei="${esc(rel)}"><span class="nm">${esc(rel.slice(top.length+1)||rel)}</span>
+        <span class="kb">${kb((f.bytes||[]).length||0)}</span></div>`;});
+    h+=`</div></details>`;
+  });
+  return h;
+}
+function vDatei(){
+  const pr=P(), rel=S.datei, f=pr.files[rel];
+  if(!f) return '<div class="card dim">Datei weg.</div>';
+  let inhalt="";
+  if(f.ext==="md") inhalt='<div class="md">'+md(f.text)+"</div>";
+  else if(f.ext==="svg") inhalt='<div class="md">'+f.text+"</div>";
+  else if(f.ext==="html"){
+    /* Fix 7: Werkzeuge liefen bisher nur als Quelltext. Jetzt laufen sie. */
+    inhalt='<iframe id="wzRahmen" style="width:100%;height:72vh;border:1px solid var(--lin);'+
+      'border-radius:10px;background:#fff" sandbox="allow-scripts allow-same-origin allow-downloads allow-modals allow-popups"></iframe>'+
+      '<details class="klapp" style="margin-top:8px"><summary>Quelltext</summary>'+
+      '<div class="inh"><pre>'+esc(f.text)+'</pre></div></details>';
+  }
+  else if(BILDEXT.includes(f.ext)){
+    inhalt='<img src="data:image/'+(f.ext==="jpg"?"jpeg":f.ext)+';base64,'+b64Von(f.bytes)+
+      '" style="max-width:100%;border-radius:9px">';
+  }
+  else if(f.ext==="pdf"){
+    const blob=new Blob([f.bytes],{type:"application/pdf"});
+    const u=URL.createObjectURL(blob);
+    inhalt='<div class="card"><p class="dim">PDF, '+kb(f.bytes.length)+'</p>'+
+      '<a class="btn haupt" style="display:inline-block;text-decoration:none" href="'+u+'" target="_blank" rel="noopener">Im Betrachter öffnen</a></div>';
+  }
+  else if(f.text!=null) inhalt="<pre>"+esc(f.text)+"</pre>";
+  else inhalt='<div class="card dim">Binärdatei, '+kb(f.bytes.length)+"</div>";
+  return `<div class="reihe"><button class="btn" id="zurueck">← Dateien</button>
+    ${f.text!=null?'<button class="btn" id="bearb">Bearbeiten</button>':""}</div>
+    <h1 style="font-size:14px;word-break:break-all">${esc(rel)}</h1>
+    <p class="dim" style="font-size:11px">${kb((f.bytes||[]).length||0)}</p>${inhalt}`;
+}
+
+function vMeins(){
+  const pr=P(); if(!pr) return '<div class="card dim">Kein Projekt.</div>';
+  if(!pr.schnipsel.length) return '<div class="card dim">Noch nichts. Nutze oben die Zeile — ein Fragezeichen macht daraus eine Frage, „Bug:" einen Bug.</div>';
+  const grp={frage:[],bug:[],notiz:[]};
+  pr.schnipsel.forEach((x,i)=>grp[x.art].push({x,i}));
+  let h="";
+  [["frage","Fragen"],["bug","Bugs"],["notiz","Notizen"]].forEach(([k,t])=>{
+    if(!grp[k].length) return;
+    h+=`<h2>${t} <span class="dim">${grp[k].length}</span></h2>`;
+    grp[k].slice().reverse().forEach(({x,i})=>{
+      h+=`<div class="card"><div style="font-size:13px">${esc(x.text)}</div>
+        <div class="dim" style="font-size:10.5px;margin-top:5px">${esc(x.t.slice(0,16).replace("T"," "))}
+        ${x.zu?" · zu "+esc(x.zu):""}</div>
+        <div class="reihe" style="margin:7px 0 0"><button class="btn" data-del="${i}" style="font-size:11px;padding:6px 10px">Löschen</button></div></div>`;});
+  });
+  return h;
+}
+
+function vWaechter(){
+  const pr=P(); if(!pr) return '<div class="card dim">Kein Projekt.</div>';
+  const t=waechter(pr);
+  if(!t.length) return '<div class="card"><b style="color:var(--ok)">Sauber</b><p class="dim">Keine gesperrten Begriffe außerhalb von Archiv und Referenz.</p></div>';
+  let h=`<div class="card dim" style="font-size:12px">Archiv, Referenz und Dokumente werden nicht geprüft — dort dürfen die alten Begriffe stehen.</div>`;
+  const nach={};
+  t.forEach(x=>{ (nach[x.rel]=nach[x.rel]||[]).push(x); });
+  Object.keys(nach).forEach(rel=>{
+    h+=`<div class="card"><b style="word-break:break-all;font-size:12.5px">${esc(rel)}</b>`;
+    nach[rel].slice(0,10).forEach(x=>h+=`<div class="dim" style="font-size:11.5px">Zeile ${x.zeile}: ${esc(x.was)}</div>`);
+    if(nach[rel].length>10) h+=`<div class="dim" style="font-size:11px">… ${nach[rel].length-10} weitere</div>`;
+    h+=`</div>`;});
+  return h;
+}
+
+function vBericht(){
+  const pr=P(); if(!pr) return '<div class="card dim">Kein Projekt.</div>';
+  return `<div class="reihe"><button class="btn haupt" id="berDl">Als Datei speichern</button>
+    <button class="btn" id="berKop">Kopieren</button></div>
+    <pre style="background:var(--panel);border:1px solid var(--lin);border-radius:10px;padding:11px;font-size:11.5px;white-space:pre-wrap">${esc(berichtText())}</pre>`;
+}
+
+function vNeu(){
+  return `<div class="card"><h1>ProjectTool ${VERSION} — ${DATUM}</h1>
+    <p class="dim">Komplett neu geschrieben. Was anders ist:</p></div>
+    <div class="card"><b>Entscheidungen sind die Wahrheit</b>
+    <p class="dim" style="font-size:12.5px">Jede Entscheidung steht einzeln in <code>${ENTPFAD}</code> — mit Kennung, Status, Datum und Quelle. Alle anderen Dateien sind abgeleitet oder Archiv. Bei jedem Widerspruch gilt diese Datei.</p></div>
+    <div class="card"><b>Merge pro Aussage</b>
+    <p class="dim" style="font-size:12.5px">Beim Laden wird nicht mehr pro Datei entschieden, sondern pro Eintrag: behalten, ersetzen oder beides behalten. Neue Einträge sind einzeln ablehnbar — auch neue Dateien.</p></div>
+    <div class="card"><b>Rückschritt-Warnung</b>
+    <p class="dim" style="font-size:12.5px">Wenn ein Paket <span class="tag t-final">final</span> gegen <span class="tag t-offen">offen</span> tauschen will oder ein älteres Datum mitbringt, wird das rot markiert und das Häkchen ist von vornherein aus.</p></div>
+    <div class="card"><b>Handy zuerst</b>
+    <p class="dim" style="font-size:12.5px">Kopf auf eine Zeile. Schnelleingabe immer sichtbar, mit Rückmeldung. Lange Listen aufklappbar. Projektwahl über einen Knopf statt Dateisuche.</p></div>
+    <div class="card"><b>Export mit Auswahl</b>
+    <p class="dim" style="font-size:12.5px">Häkchen pro Bereich mit Dateizahl und Größe, laufende Gesamtsumme, drei Voreinstellungen. Die Auswahl merkt sich.</p></div>
+    <div class="card"><b>index.json</b>
+    <p class="dim" style="font-size:12.5px">Bei jedem Export entsteht ein Register aller Dateien mit Prüfsumme — damit sichtbar wird, was sich wirklich geändert hat.</p></div>
+    <div class="card"><b>Nicht dabei</b>
+    <p class="dim" style="font-size:12.5px">Fragebogen-Tool und Mesh-Viewer. Beide sind eigene Rechenwerke, das Paket würde zu groß.</p></div>`;
+}
+
+function vConfig(){
+  const pr=P(); if(!pr) return '<div class="card dim">Kein Projekt.</div>';
+  const f=pr.config.farbe||"#5eead4";
+  return `<div class="card"><b>Akzentfarbe</b>
+    <div class="farbfeld">${FARBEN.map(c=>`<button data-farbe="${c}" class="${c===f?"an":""}" style="background:${c}"></button>`).join("")}</div></div>
+    <div class="card"><b>Projekt</b>
+    <p class="dim" style="font-size:12px">Name ${esc(pr.name)} · Ordner ${esc(pr.dir)} · ${Object.keys(pr.files).length} Dateien</p></div>
+    <div class="card"><b>Speichern</b>
+    <p class="dim" style="font-size:12px">${autoAn?"Autospeichern läuft in eine echte Datei.":"Noch keine Datei gewählt. Es läuft nur die Sicherung im Browserspeicher."}</p>
+    <div class="reihe">${speicherKann?`<button class="btn" id="cfgDatei">Datei wählen</button>
+    <button class="btn" id="cfgLaden">Arbeitsstand laden</button>`:""}
+    <button class="btn haupt" id="cfgSichern">Als Datei sichern</button>
+    <button class="btn" id="cfgAusDatei">Aus Datei laden</button></div>
+    <p class="dim" style="font-size:11px;margin:4px 0 0">Der Weg über Datei funktioniert auf jedem Gerät, auch am Handy.</p></div>
+    <div class="card"><b>Gefahrenzone</b>
+    <p class="dim" style="font-size:12px">Setzt nur den Arbeitsstand zurück, keine Projektdateien.</p>
+    <div class="reihe"><button class="btn warn" id="cfgReset">Arbeitsstand zurücksetzen</button></div></div>`;
+}
+
+/* ---------- Merge-Ansicht ---------- */
+let mDateiWahl=null, mEntWahl=null;
+function vMerge(){
+  if(!PENDING) return '<div class="card dim">Nichts offen.</div>';
+  const P0=PENDING;
+  if(!mDateiWahl){
+    mDateiWahl={neu:P0.neu.map(()=>true),ge:P0.geaendert.map(()=>"neu")};
+    mEntWahl=P0.entDiff?P0.entDiff.neu.map(x=>x.wahl):[];
+  }
+  const eD=P0.entDiff;
+  const rueck=eD?eD.neu.filter(x=>x.rueck).length:0;
+  let h=`<h1>Änderungen prüfen</h1>
+    <p class="dim">Nichts wurde bisher geschrieben. Du entscheidest jede Zeile einzeln.</p>`;
+  if(rueck) h+=`<div class="card warnbox"><div class="warnzeile">⚠ ${rueck} Rückschritt${rueck>1?"e":""} erkannt</div>
+    <div class="dim" style="font-size:12px">Das Paket will Entschiedenes zu Offenem zurückdrehen oder bringt ein älteres Datum mit. Diese Zeilen stehen unten rot, das Häkchen ist bewusst aus.</div></div>`;
+  h+=`<div class="grid">
+    <div class="stat"><div class="n" style="color:var(--ok)">${P0.neu.length}</div><div class="l">neue Dateien</div></div>
+    <div class="stat"><div class="n" style="color:var(--warn)">${P0.geaendert.length}</div><div class="l">geänderte</div></div>
+    <div class="stat"><div class="n" style="color:var(--akz)">${eD?eD.neu.length:0}</div><div class="l">Entscheidungen</div></div>
+    <div class="stat"><div class="n dim">${P0.gleich.length}</div><div class="l">gleich</div></div></div>`;
+
+  if(eD&&eD.neu.length){
+    h+=`<h2>Entscheidungen — einzeln</h2>`;
+    eD.neu.map((it,i)=>({it,i})).sort((a,b)=>(b.it.rueck?1:0)-(a.it.rueck?1:0)).forEach(({it,i})=>{
+      const e=it.e, a=it.alt;
+      h+=`<div class="card ${it.rueck?"warnbox":""}">`;
+      if(it.rueck) h+=`<div class="warnzeile">⚠ Rückschritt: ${a?esc(a.status):"?"} → ${esc(e.status)}${a&&e.datum<a.datum?" · älteres Datum":""}</div>`;
+      h+=`<div class="kopfz" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span class="kid" style="font-family:ui-monospace,monospace;font-size:11px;color:var(--akz)">${esc(e.id)}</span>
+        <span class="tag t-${e.status}">${e.status}</span></div>`;
+      if(!a) h+=`<div style="font-size:12.5px;margin-top:6px">${esc(e.text)}</div>
+        <div class="dim" style="font-size:10.5px;margin-top:4px">neuer Eintrag · ${esc(e.datum||"")}</div>`;
+      else h+=`<div class="gegen">
+        <div><h4>Dein Stand</h4><div class="meta">${esc(a.status)} · ${esc(a.datum||"")}</div><div class="inh">${esc(a.text)}</div></div>
+        <div><h4>Aus dem Paket</h4><div class="meta">${esc(e.status)} · ${esc(e.datum||"")}</div><div class="inh">${esc(e.text)}</div></div></div>`;
+      h+=`<div class="wahl" data-entidx="${i}">
+        <button data-w="alt" class="${mEntWahl[i]==="alt"?"an":""}">${a?"Meins behalten":"Nicht übernehmen"}</button>
+        <button data-w="neu" class="${mEntWahl[i]==="neu"?"an":""}">${a?"Ersetzen":"Übernehmen"}</button>
+        ${a?`<button data-w="beide" class="${mEntWahl[i]==="beide"?"an":""}">Beides behalten</button>`:""}
+      </div></div>`;
+    });
+  }
+  if(P0.neu.length){
+    h+=`<h2>Neue Dateien</h2>`;
+    P0.neu.forEach((x,i)=>{
+      h+=`<div class="card"><label class="chk"><input type="checkbox" data-mneu="${i}" ${mDateiWahl.neu[i]?"checked":""}>
+        <span><b style="word-break:break-all;font-size:12.5px">${esc(x.rel)}</b>
+        <span class="dim" style="font-size:10.5px;display:block">${esc(x.proj)} · ${kb(x.rec.bytes.length)}</span></span></label></div>`;});
+  }
+  if(P0.geaendert.length){
+    h+=`<h2>Geänderte Dateien</h2>`;
+    P0.geaendert.forEach((x,i)=>{
+      const A=(x.alt.text||"").split(/\r?\n/), B=(x.rec.text||"").split(/\r?\n/);
+      const sa=new Set(A), sb=new Set(B);
+      const raus=A.filter(l=>l.trim()&&!sb.has(l)), rein=B.filter(l=>l.trim()&&!sa.has(l));
+      const kleiner=(x.rec.bytes.length < x.alt.bytes.length*0.6);
+      h+=`<div class="card ${kleiner?"warnbox":""}">`;
+      if(kleiner) h+=`<div class="warnzeile">⚠ Deutlich kleiner — ${kb(x.alt.bytes.length)} wird ${kb(x.rec.bytes.length)}</div>`;
+      h+=`<b style="word-break:break-all;font-size:12.5px">${esc(x.rel)}</b>
+        <div class="dim" style="font-size:10.5px">${raus.length} Zeilen fallen weg, ${rein.length} kommen dazu</div>`;
+      raus.slice(0,5).forEach(l=>h+=`<div class="dz del">− ${esc(l)}</div>`);
+      rein.slice(0,5).forEach(l=>h+=`<div class="dz add">+ ${esc(l)}</div>`);
+      if(raus.length>5||rein.length>5) h+=`<div class="dim" style="font-size:10.5px">… gekürzt</div>`;
+      h+=`<div class="wahl" data-geidx="${i}">
+        <button data-w="alt" class="${mDateiWahl.ge[i]==="alt"?"an":""}">Meins behalten</button>
+        <button data-w="neu" class="${mDateiWahl.ge[i]==="neu"?"an":""}">Ersetzen</button>
+        <button data-w="beide" class="${mDateiWahl.ge[i]==="beide"?"an":""}">Beides behalten</button>
+      </div></div>`;});
+  }
+  if(P0.ablage.length) h+=`<div class="card dim" style="font-size:11.5px">${P0.ablage.length} Datei(en) gehören zu keinem Projekt und werden nicht eingespielt.</div>`;
+  h+=`<div class="reihe" style="margin-top:14px">
+    <button class="btn haupt" id="mOk">Übernehmen</button>
+    <button class="btn warn" id="mNo">Alles verwerfen</button></div>`;
+  return h;
+}
+
+/* ================= Zeichnen ================= */
+function zeichne(){
+  const pr=P();
+  $("#verTxt").textContent=VERSION;
+  $("#projName").textContent=pr?pr.name:"Projekt wählen";
+  $("#projZahl").textContent=pr?Object.keys(pr.files).length:"";
+  if(pr&&pr.config.farbe) document.documentElement.style.setProperty("--akz",pr.config.farbe);
+  zeichneSpz(); zeichneReiter();
+  const V={_start:vStart,_ent:vEnt,_dateien:vDateien,_meins:vMeins,_waechter:vWaechter,
+    _bericht:vBericht,_neu:vNeu,_config:vConfig,_merge:vMerge};
+  $("#main").innerHTML=(V[S.tab]||vStart)();
+  binde();
+  /* Fix 3: nur beim echten Wechsel nach oben. Sonst sprang die Seite
+     bei jedem Klick und jedem Buchstaben in der Suche. */
+  const marke=S.tab+"|"+(S.datei||"");
+  if(marke!==letzteAnsicht){ letzteAnsicht=marke; window.scrollTo(0,0); }
+}
+let letzteAnsicht="";
+function binde(){
+  const m=$("#main"), pr=P();
+  m.querySelectorAll("[data-datei]").forEach(el=>el.onclick=()=>{S.datei=el.dataset.datei;zeichne();});
+  const zb=$("#zurueck"); if(zb) zb.onclick=()=>{S.datei=null;zeichne();};
+  const ds=$("#datS"); if(ds) ds.oninput=()=>{S.filter=ds.value;
+    const p=ds.selectionStart; zeichne(); const n=$("#datS"); if(n){n.focus();n.setSelectionRange(p,p);} };
+  const es=$("#entS"); if(es) es.oninput=()=>{S.entSuche=es.value;
+    const p=es.selectionStart; zeichne(); const n=$("#entS"); if(n){n.focus();n.setSelectionRange(p,p);} };
+  m.querySelectorAll("[data-f]").forEach(b=>b.onclick=()=>{S.entFilter=b.dataset.f;zeichne();});
+  m.querySelectorAll("[data-entkomm]").forEach(b=>b.onclick=()=>{
+    const t=prompt("Dazu sagen:"); if(!t) return;
+    schnipsel(t,b.dataset.entkomm); toast("Notiert");});
+  m.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{
+    pr.schnipsel.splice(+b.dataset.del,1); sichern(); zeichne();});
+  m.querySelectorAll("[data-farbe]").forEach(b=>b.onclick=()=>{
+    pr.config.farbe=b.dataset.farbe; configSchreiben(pr); sichern(); zeichne();});
+  const wz=$("#wzRahmen");
+  if(wz&&pr&&S.datei&&pr.files[S.datei]) wz.srcdoc=pr.files[S.datei].text;
+  const bb=$("#bearb"); if(bb) bb.onclick=()=>bearbeiten();
+  const cd=$("#cfgDatei"); if(cd) cd.onclick=dateiWaehlen;
+  const cl=$("#cfgLaden"); if(cl) cl.onclick=standLaden;
+  const cs=$("#cfgSichern"); if(cs) cs.onclick=standSichernAlsDatei;
+  const ca=$("#cfgAusDatei"); if(ca) ca.onclick=()=>$("#fStand").click();
+  const cr=$("#cfgReset"); if(cr) cr.onclick=()=>{
+    if(!confirm("Arbeitsstand zurücksetzen? Projektdateien bleiben.")) return;
+    pr.schnipsel=[]; pr.log=[]; localStorage.removeItem("pt_stand"); sichern(); zeichne();};
+  const bd=$("#berDl"); if(bd) bd.onclick=()=>{
+    const b=new Blob([berichtText()],{type:"text/markdown"});
+    const a=document.createElement("a"); a.href=URL.createObjectURL(b);
+    a.download="BERICHT_"+pr.name+"_"+stamp()+".md"; a.click();};
+  const bk=$("#berKop"); if(bk) bk.onclick=()=>{
+    const t=document.createElement("textarea"); t.value=berichtText();
+    document.body.appendChild(t); t.select();
+    try{document.execCommand("copy");toast("Kopiert");}catch(e){}
+    document.body.removeChild(t);};
+  m.querySelectorAll("[data-entidx]").forEach(w=>{
+    const i=+w.dataset.entidx;
+    w.querySelectorAll("button").forEach(b=>b.onclick=()=>{ mEntWahl[i]=b.dataset.w; zeichne(); });});
+  m.querySelectorAll("[data-geidx]").forEach(w=>{
+    const i=+w.dataset.geidx;
+    w.querySelectorAll("button").forEach(b=>b.onclick=()=>{ mDateiWahl.ge[i]=b.dataset.w; zeichne(); });});
+  m.querySelectorAll("[data-mneu]").forEach(c=>c.onchange=()=>{ mDateiWahl.neu[+c.dataset.mneu]=c.checked; });
+  const mo=$("#mOk"); if(mo) mo.onclick=()=>{ mergeAnwenden(mDateiWahl,mEntWahl); mDateiWahl=null; };
+  const mn=$("#mNo"); if(mn) mn.onclick=()=>{
+    if(!confirm("Das ganze Paket verwerfen?")) return;
+    PENDING=null; mDateiWahl=null; S.tab="_start"; zeichne();};
+}
+function bearbeiten(){
+  const pr=P(), rel=S.datei;
+  const alt=pr.files[rel].text;
+  dialog(`<h3>${esc(rel)}</h3><textarea id="edT" style="min-height:46vh">${esc(alt)}</textarea>
+    <div class="reihe" style="margin-top:10px"><button class="btn haupt" id="edOk">Speichern</button>
+    <button class="btn" id="edNo">Abbrechen</button></div>`,()=>{
+      $("#edOk").onclick=()=>{
+        setzeDatei(pr,rel,$("#edT").value);
+        pr.log.push({t:jetzt(),art:"bearbeitet",datei:rel});
+        if(rel===ENTPFAD) pr.ent=entLesen(pr);
+        zuDlg(); sichern(); zeichne(); toast("Gespeichert");};
+      $("#edNo").onclick=zuDlg;});
+}
+
+/* ================= Schnipsel ================= */
+function schnipsel(text,zu){
+  const pr=P(); if(!pr){ alert("Erst ein Projekt laden."); return; }
+  let art="notiz";
+  if(/^bug[:\s]/i.test(text)) art="bug";
+  else if(text.includes("?")) art="frage";
+  pr.schnipsel.push({t:jetzt(),art,text:text.replace(/^bug[:\s]*/i,""),zu:zu||null});
+  sichern();
+  const e=$("#echo");
+  e.textContent=(art==="bug"?"Bug":art==="frage"?"Frage":"Notiz")+" gemerkt · "+pr.schnipsel.length+" gesamt";
+  setTimeout(()=>{ if(e) e.textContent=""; },3500);
+  if(S.tab==="_meins") zeichne(); else zeichneReiter();
+}
+
+/* ================= Dialoge ================= */
+function dialog(html,nach){
+  zuDlg();
+  const d=document.createElement("div"); d.className="dlg"; d.id="dlg";
+  d.innerHTML='<div class="box">'+html+"</div>";
+  d.onclick=e=>{ if(e.target===d) zuDlg(); };
+  document.body.appendChild(d);
+  if(nach) nach();
+}
+function zuDlg(){ const d=$("#dlg"); if(d) d.remove(); }
+
+function dlgProjekt(){
+  const namen=Object.keys(PROJ);
+  let h=`<h3>Projekt</h3><p class="dim" style="font-size:12px">Antippen lädt es samt Arbeitsstand.</p>`;
+  if(!namen.length) h+=`<div class="card dim">Noch nichts geladen.</div>`;
+  namen.forEach(n=>{
+    const pr=PROJ[n], ent=(pr.ent&&pr.ent.eintraege)||[];
+    h+=`<div class="zeile" data-pw="${esc(n)}" style="${n===CUR?"border-color:var(--akz)":""}">
+      <span class="nm"><b>${esc(n)}</b><span class="dim" style="display:block;font-size:10.5px">
+      ${Object.keys(pr.files).length} Dateien · ${ent.length} Entscheidungen</span></span>
+      ${n===CUR?'<span class="kb" style="color:var(--akz)">aktiv</span>':""}</div>`;});
+  h+=`<div class="reihe" style="margin-top:12px">
+    <button class="btn haupt" id="dpOrd">Ordner wählen</button>
+    <button class="btn" id="dpZip">ZIP laden</button></div>
+    <div class="reihe"><button class="btn" id="dpZu">Schließen</button></div>`;
+  dialog(h,()=>{
+    document.querySelectorAll("[data-pw]").forEach(el=>el.onclick=()=>{
+      CUR=el.dataset.pw; S.tab="_start"; S.datei=null; zuDlg(); zeichne();});
+    $("#dpOrd").onclick=()=>{ zuDlg(); $("#fOrd").click(); };
+    $("#dpZip").onclick=()=>{ zuDlg(); $("#fZip").click(); };
+    $("#dpZu").onclick=zuDlg;});
+}
+
+function dlgMenu(){
+  dialog(`<h3>Menü</h3>
+    <div class="reihe"><button class="btn haupt" id="mExp">Export ZIP</button></div>
+    <div class="reihe"><button class="btn" id="mAend">Änderungen laden</button>
+    <button class="btn" id="mOrd">Ordner wählen</button></div>
+    <div class="reihe" style="margin-top:6px"><button class="btn" onclick="speicherVergessen()">Speicher leeren</button></div>
+    <div class="reihe"><button class="btn" id="mSess">Session-Ende</button>
+    <button class="btn" id="mZu">Schließen</button></div>`,()=>{
+      $("#mExp").onclick=()=>{ zuDlg(); dlgExport(); };
+      $("#mAend").onclick=()=>{ zuDlg(); $("#fZip").click(); };
+      $("#mOrd").onclick=()=>{ zuDlg(); $("#fOrd").click(); };
+      $("#mSess").onclick=()=>{ zuDlg(); sessionEnde(); };
+      $("#mZu").onclick=zuDlg;});
+}
+
+function dlgExport(){
+  const pr=P(); if(!pr){ alert("Erst ein Projekt laden."); return; }
+  const {b,aus,t,ausT}=exportAuswahl(pr);
+  const keys=Object.keys(b).sort();
+  const tkeys=Object.keys(t).sort();
+  const bau=()=>{
+    let sum=0,anz=0;
+    Object.keys(pr.files).forEach(rel=>{
+      const top=rel.includes("/")?rel.split("/")[0]:"(Wurzel)";
+      const ex=(rel.split(".").pop()||"?").toLowerCase();
+      if(aus[top]===false) return;
+      if(ausT[ex]===false && rel!==ENTPFAD && rel!==CFGPFAD && rel!==REGELPFAD) return;
+      anz++; sum+=(pr.files[rel].bytes||[]).length||0;
+    });
+    return `<h3>Export</h3>
+      <div class="reihe">
+        <button class="btn" data-pre="arbeit">Arbeitsstand</button>
+        <button class="btn" data-pre="standard">Standard</button>
+        <button class="btn" data-pre="voll">Vollständig</button></div>
+      ${keys.map(k=>`<label class="chk"><input type="checkbox" data-ex="${esc(k)}" ${aus[k]?"checked":""}>
+        <span><b style="font-size:12.5px">${esc(k)}</b>
+        <span class="dim" style="font-size:10.5px;display:block">${b[k].n} Dateien · ${kb(b[k].b)}</span></span></label>`).join("")}
+      <details class="klapp" style="margin-top:8px"><summary>Dateiarten</summary><div class="inh">
+      ${tkeys.map(e=>`<label class="chk"><input type="checkbox" data-ext="${esc(e)}" ${ausT[e]?"checked":""}>
+        <span><b style="font-size:12.5px">.${esc(e)}</b>
+        <span class="dim" style="font-size:10.5px;display:block">${t[e].n} Dateien · ${kb(t[e].b)}</span></span></label>`).join("")}
+      </div></details>
+      <div class="card" style="margin-top:10px"><b style="color:var(--akz)">${anz} Dateien · ${kb(sum)}</b>
+      <div class="dim" style="font-size:11px">ProjectTool.html und das Manifest kommen immer mit.</div></div>
+      <div class="reihe"><button class="btn haupt" id="exOk">ZIP erzeugen</button>
+      <button class="btn" id="exNo">Abbrechen</button></div>`;
+  };
+  const binden=()=>{
+    document.querySelectorAll("[data-ex]").forEach(c=>c.onchange=()=>{
+      aus[c.dataset.ex]=c.checked; neu();});
+    document.querySelectorAll("[data-ext]").forEach(c=>c.onchange=()=>{
+      ausT[c.dataset.ext]=c.checked; neu();});
+    document.querySelectorAll("[data-pre]").forEach(bt=>bt.onclick=()=>{
+      const p=bt.dataset.pre;
+      keys.forEach(k=>{
+        if(p==="voll") aus[k]=true;
+        else if(p==="arbeit") aus[k]=/^(00_Entscheidungen|0[1-9]_|1[0-9]_)/.test(k)&&!/Altbestand|Dokumente|Konzepte/i.test(k);
+        else aus[k]=!/Altbestand|_Archiv/i.test(k)&&!k.startsWith("(");
+      });
+      tkeys.forEach(e=>{
+        if(p==="voll") ausT[e]=true;
+        else if(p==="arbeit") ausT[e]=!/^(svg|zip|pdf|png|jpg|jpeg|gif|webp|bmp)$/.test(e);
+        else ausT[e]=!/^(svg|zip)$/.test(e);
+      });
+      neu();});
+    $("#exOk").onclick=()=>{
+      pr.config.export={...aus}; pr.config.exportTyp={...ausT};
+      sichern(); zuDlg(); exportieren(aus,pr.name,ausT);};
+    $("#exNo").onclick=zuDlg;
+  };
+  const neu=()=>{ const bx=document.querySelector("#dlg .box"); if(bx){ bx.innerHTML=bau(); binden(); } };
+  dialog(bau(),binden);
+}
+
+function sessionEnde(){
+  const pr=P(); if(!pr) return;
+  const d=heute();
+  let s="# Session "+d+"\ntool: "+VERSION+"\n\n";
+  const ent=(pr.ent&&pr.ent.eintraege)||[];
+  s+="## Offen geblieben\n";
+  ent.filter(e=>e.status==="offen").forEach(e=>s+="- ["+e.id+"] "+e.text+"\n");
+  s+="\n## Meins\n";
+  pr.schnipsel.forEach(x=>s+="- ("+x.art+") "+x.text+"\n");
+  s+="\n## Geändert\n";
+  pr.log.slice(-60).forEach(l=>s+="- "+l.t.slice(0,16).replace("T"," ")+" "+l.art+" "+l.datei+"\n");
+  const rel="08_Sessions/"+d+".md";
+  const alt=pr.files[rel]?pr.files[rel].text+"\n\n---\n\n":"";
+  setzeDatei(pr,rel,alt+s);
+  pr.log.push({t:jetzt(),art:"session",datei:rel});
+  sichern(); S.tab="_dateien"; S.datei=rel; zeichne(); toast("Session gesichert");
+}
+
+/* ================= Start ================= */
+$("#btnProj").onclick=dlgProjekt;
+$("#btnMenu").onclick=dlgMenu;
+$("#qBtn").onclick=()=>{ const i=$("#qIn"); if(!i.value.trim())return; schnipsel(i.value.trim()); i.value=""; };
+$("#qIn").onkeydown=e=>{ if(e.key==="Enter") $("#qBtn").click(); };
+$("#fZip").onchange=e=>{ if(e.target.files[0]) ladeZip(e.target.files[0]); e.target.value=""; };
+$("#fOrd").onchange=e=>{ if(e.target.files.length) ladeOrdner(e.target.files); e.target.value=""; };
+$("#fStand").onchange=e=>{ if(e.target.files[0]) standAusDatei(e.target.files[0]); e.target.value=""; };
+const _le=ladeEintraege;
+ladeEintraege=async function(a,b){ await _le(a,b);
+  Object.values(PROJ).forEach(pr=>{ if(!pr.ent) pr.ent=entLesen(pr); configUebernehmen(pr); }); zeichne(); };
+
+/* T22: Hochlauf. Erst Speicher oeffnen, Dauerhaftigkeit anfordern,
+   Stand und Dateien zuruecklesen — dann zeichnen. Nichts wird gefragt,
+   was schon einmal beantwortet wurde. */
+(async function hochlauf(){
+  try{ DB=await dbOffen(); }catch(e){ DB=null; }
+  try{ await dauerPruefen(); }catch(e){}
+  let st=null;
+  try{ st=await dbHol("kv","stand"); }catch(e){}
+  if(!st){ try{ const g=localStorage.getItem("pt_stand"); if(g) st=JSON.parse(g); }catch(e){} }
+  if(st) standZurueck(st);
+  if(DB){
+    let keys=[]; try{ keys=await dbSchluessel("dateien"); }catch(e){}
+    for(const n of keys){
+      let rec=null; try{ rec=await dbHol("dateien",n); }catch(e){}
+      if(!rec||!rec.files) continue;
+      if(!PROJ[n]) PROJ[n]=neuProjekt(n,rec.dir);
+      PROJ[n].dir=rec.dir||PROJ[n].dir;
+      const f={};
+      Object.keys(rec.files).forEach(rel=>{ const x=rec.files[rel];
+        f[rel]={bytes:x.bytes?(x.bytes instanceof Uint8Array?x.bytes:new Uint8Array(x.bytes)):null,
+                text:x.text==null?undefined:x.text, ext:x.ext}; });
+      PROJ[n].files=f;
+      PROJ[n].ent=entLesen(PROJ[n]);
+      configUebernehmen(PROJ[n]);
+    }
+  }
+  const namen=Object.keys(PROJ);
+  if(namen.length) CUR=(st&&st.cur&&PROJ[st.cur])?st.cur:(CUR&&PROJ[CUR]?CUR:namen[0]);
+  if(st&&st.tab) S.tab=st.tab==="_merge"?"_start":st.tab;
+  await fhPruefen();
+  bereit=true;
+  zeichne();
+  sichern();
+})();
+</script>
+</body>
+</html>
