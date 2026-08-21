@@ -229,7 +229,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T32", DATUM="2026-08-21";
+const VERSION="T33", DATUM="2026-08-21";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -361,15 +361,36 @@ function warte(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 /* Wiederholt bei Netzaussetzern. Andere Fehler (Token, fehlendes Recht)
    werden NICHT wiederholt — die gehen auch beim zweiten Mal schief.
-   T29: der Ref-Konflikt aus bug.409.repo.leer kommt dazu. Er entsteht,
-   weil beim Senden mehrere Schreibvorgaben kurz hintereinander laufen und
-   die Ref draussen noch nicht nachgezogen ist; beim zweiten Versuch ist
-   sie es meist. Bisher fing das nur die 20-Sekunden-Schleife in ghAuto ab. */
+   T33: der Ref-Konflikt gehoert NICHT hierher. T29 hatte ihn aufgenommen,
+   damit die 20-Sekunden-Schleife in ghAuto ihn abfaengt. Das war falsch:
+   ein 409 wird durch Warten nie besser, nur durch einen frischen sha.
+   Sebastian sah am 2026-08-21 um 23:33 und 23:44 je drei identische 409
+   im Abstand von 1,4 und 2,3 Sekunden — dreimal derselbe veraltete sha.
+   Der Konflikt wird jetzt in ghSchreibFrisch behandelt, wo er hingehoert. */
+function konfliktFehler(e){
+  return String(e&&e.message||"").indexOf("Repository hat sich zwischendurch geaendert")>=0;
+}
 function netzFehler(e){
   const m=String(e&&e.message||"");
   return m.indexOf("Keine Verbindung")>=0 || m.indexOf("Limit erreicht")>=0
-      || m.indexOf("GitHub meldet 5")>=0
-      || m.indexOf("Repository hat sich zwischendurch geaendert")>=0;
+      || m.indexOf("GitHub meldet 5")>=0;
+}
+/* Schreibt und holt bei einem Ref-Konflikt genau einmal den Baum frisch,
+   bevor es erneut versucht. Der uebergebene Baum wird dabei nachgezogen,
+   damit die naechste Datei im selben Durchlauf nicht wieder auflaeuft. */
+async function ghSchreibFrisch(voll,u8,nachricht,baum,shaVorgabe){
+  const sha=shaVorgabe!==undefined
+    ? shaVorgabe
+    : (baum&&baum[voll]?baum[voll].sha:null);
+  try{
+    return await mitWiederholung(()=>ghSchreib(voll,u8,nachricht,sha));
+  }catch(e){
+    if(!konfliktFehler(e)) throw e;
+    const frisch=await ghBaum();
+    if(baum) Object.keys(frisch).forEach(k=>{ baum[k]=frisch[k]; });
+    return await mitWiederholung(()=>ghSchreib(voll,u8,nachricht,
+      frisch[voll]?frisch[voll].sha:null));
+  }
 }
 async function mitWiederholung(fn,versuche){
   versuche=versuche||3;
@@ -559,17 +580,8 @@ async function ghStandSenden(baum){
     if(pr.standKern===kern) continue;
     const voll=ghStandVoll(pr);
     const u=ENC.encode(JSON.stringify(standScheibe(pr),null,1));
-    let sha=(baum&&baum[voll]?baum[voll].sha:null)||pr.standSha||null;
-    try{
-      pr.standSha=await mitWiederholung(()=>ghSchreib(voll,u,"ProjectTool: Arbeitsstand",sha));
-    }catch(e){
-      /* Fassung im Repo ist neuer als der bekannte Stand: Baum auffrischen,
-         einmal erneut versuchen. Scheitert es wieder, bleibt es offen. */
-      if(netzFehler(e)) throw e;
-      const frisch=await ghBaum();
-      if(baum) baum[voll]=frisch[voll];
-      pr.standSha=await ghSchreib(voll,u,"ProjectTool: Arbeitsstand",frisch[voll]?frisch[voll].sha:null);
-    }
+    const sha=(baum&&baum[voll]?baum[voll].sha:null)||pr.standSha||null;
+    pr.standSha=await ghSchreibFrisch(voll,u,"ProjectTool: Arbeitsstand",baum,sha);
     pr.standKern=kern; n++;
     await warte(120);
   }
@@ -670,7 +682,8 @@ async function ghAuto(){
     for(const {pr,rel} of ghOffen()){
       const voll=ghVoll(pr,rel), f=pr.files[rel], fern=baum[voll];
       if(fern&&f.sha&&fern.sha!==f.sha) continue;   /* Konflikt: liegen lassen */
-      f.sha=await ghSchreib(voll,f.bytes||ENC.encode(f.text||""),"ProjectTool: "+rel,fern?fern.sha:null);
+      f.sha=await ghSchreibFrisch(voll,f.bytes||ENC.encode(f.text||""),
+        "ProjectTool: "+rel,baum,fern?fern.sha:null);
       delete f.schmutzig;
       await warte(120);
     }
@@ -719,8 +732,8 @@ async function ghSchieben(nachricht,alle){
     const voll=ghVoll(pr,rel), f=pr.files[rel], fern=baum[voll];
     if(!alle && fern && f.sha && fern.sha!==f.sha){ konflikt.push(voll); continue; }
     try{
-      const neuSha=await mitWiederholung(()=>ghSchreib(voll,f.bytes||ENC.encode(f.text||""),
-        nachricht||("ProjectTool: "+rel),fern?fern.sha:null));
+      const neuSha=await ghSchreibFrisch(voll,f.bytes||ENC.encode(f.text||""),
+        nachricht||("ProjectTool: "+rel),baum,fern?fern.sha:null);
       f.sha=neuSha; delete f.schmutzig; ok++;
       /* laufend sichern: bricht es ab, ist das Erreichte erhalten */
       if(ok%10===0) await sichern();
