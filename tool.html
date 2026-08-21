@@ -219,7 +219,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T27 13:02", DATUM="2026-08-21 13:02";
+const VERSION="T28", DATUM="2026-08-21";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -1354,10 +1354,60 @@ function zeichneSpz(){
   const t=$("#spzTxt"); if(t) t.onclick=dlgSpzErklaerung;
   zeichneQuad();
 }
+/* ================= Werkzeuge (T28, anm.01) =================
+   Werkzeuge sind die HTML-Dateien des Projekts. Sie laufen wieder in einem
+   eigenen Browsertab statt im eingebetteten Rahmen: im Rahmen fehlten
+   Bildschirmhoehe, Zurueck-Taste und Adresszeile, und Downloads aus dem
+   Werkzeug heraus wurden vom Sandkasten geschluckt. */
+function werkzeugListe(pr){
+  if(!pr) return [];
+  return Object.keys(pr.files).filter(r=>(pr.files[r].ext||"")==="html")
+    .filter(r=>!/^_Archiv\//.test(r)).sort();
+}
+/* Haelt die erzeugten Adressen fest, damit sie nicht sofort wieder
+   eingesammelt werden, solange der Tab offen ist. */
+const WZOFFEN={};
+function werkzeugOeffnen(rel){
+  const pr=P(); if(!pr||!pr.files[rel]) { toast("Datei nicht da"); return; }
+  if(WZOFFEN[rel]) URL.revokeObjectURL(WZOFFEN[rel]);
+  const b=new Blob([pr.files[rel].text],{type:"text/html;charset=utf-8"});
+  const u=URL.createObjectURL(b); WZOFFEN[rel]=u;
+  const w=window.open(u,"_blank","noopener");
+  if(!w) toast("Der Browser hat den Tab blockiert — Popups für diese Seite erlauben.");
+}
+function vWerkzeuge(){
+  const pr=P(); if(!pr) return '<div class="card dim">Erst ein Projekt laden.</div>';
+  const l=werkzeugListe(pr);
+  if(!l.length) return '<div class="card dim">Dieses Projekt hat keine HTML-Werkzeuge.</div>';
+  return `<h1 style="font-size:15px">Werkzeuge</h1>
+    <div class="dim" style="font-size:11.5px;line-height:1.45;margin-bottom:9px">
+    Jedes Werkzeug öffnet in einem eigenen Browsertab und läuft dort mit voller
+    Bildschirmhöhe. Der Stand kommt aus dem hier geladenen Projekt, nicht aus dem
+    Repository — was hier ungesendet liegt, läuft also mit.</div>
+    ${l.map(rel=>{
+      const f=pr.files[rel];
+      const name=rel.split("/").pop().replace(/\.html$/,"");
+      return `<div class="card"><b style="font-size:13px">${esc(name)}</b>
+        <div class="dim" style="font-size:10.5px;word-break:break-all">${esc(rel)} · ${kb((f.bytes||[]).length||(f.text||"").length)}</div>
+        <div class="reihe" style="margin-top:7px">
+        <button class="btn haupt" data-wzauf="${esc(rel)}">In neuem Tab öffnen</button>
+        <button class="btn" data-wzdat="${esc(rel)}">Datei ansehen</button></div></div>`;
+    }).join("")}`;
+}
+
+/* T28 / anm.01: Der Projektreiter traegt nur noch die Punkte, an denen
+   taeglich gearbeitet wird. Waechter, Repos, Bericht, Was ist neu und
+   Config sind nicht verschwunden — sie stehen jetzt im Menue (anm.04,
+   anm.08) und bleiben ueber S.tab genauso erreichbar wie zuvor.
+   Neu dazu: Werkzeuge, damit die HTML-Werkzeuge des Projekts nicht mehr
+   ueber die Dateiliste gesucht werden muessen. */
 const TABS=[
-  ["_start","Start"],["_eingang","Eingang"],["_ent","Entscheidungen"],["_dateien","Dateien"],["_meins","Meins"],
-  ["_waechter","Wächter"],["_repo","Repos"],["_bericht","Bericht"],["_neu","Was ist neu"],["_config","Config"]
+  ["_start","Start"],["_eingang","Eingang"],["_ent","Entscheidungen"],
+  ["_dateien","Dateien"],["_werkzeuge","Werkzeuge"],["_meins","Meins"]
 ];
+/* Aus der Reiterleiste ins Menue gewandert, unveraendert erreichbar:
+   _waechter und _bericht ueber Bereich 3, _config und _repo ueber
+   Bereich 4, _neu ueber Bereich 5 in dlgMenu. */
 function zeichneReiter(){
   const pr=P();
   $("#reiter").innerHTML=TABS.map(([id,t])=>{
@@ -1367,6 +1417,7 @@ function zeichneReiter(){
       if(id==="_eingang") z=eingangListe(pr).length||"";
       if(id==="_dateien") z=Object.keys(pr.files).length;
       if(id==="_meins") z=pr.schnipsel.length||"";
+      if(id==="_werkzeuge") z=werkzeugListe(pr).length||"";
       if(id==="_waechter") z=waechter(pr).length||"";
     }
     return '<button data-tab="'+id+'" class="'+(S.tab===id?"an":"")+'">'+t+
@@ -1617,9 +1668,11 @@ function vDatei(){
   if(f.ext==="md") inhalt='<div class="md">'+md(f.text)+"</div>";
   else if(f.ext==="svg") inhalt='<div class="md">'+f.text+"</div>";
   else if(f.ext==="html"){
-    /* Fix 7: Werkzeuge liefen bisher nur als Quelltext. Jetzt laufen sie. */
-    inhalt='<iframe id="wzRahmen" style="width:100%;height:72vh;border:1px solid var(--lin);'+
-      'border-radius:10px;background:#fff" sandbox="allow-scripts allow-same-origin allow-downloads allow-modals allow-popups"></iframe>'+
+    /* T28, anm.01: zurueck zum eigenen Tab. Der eingebettete Rahmen aus
+       Fix 7 kostete Bildschirmhoehe und schluckte Downloads. */
+    inhalt='<div class="card"><b style="font-size:12.5px">HTML-Werkzeug</b>'+
+      '<div class="dim" style="font-size:11px;line-height:1.45;margin:3px 0 7px">Läuft in einem eigenen Browsertab mit voller Bildschirmhöhe.</div>'+
+      '<button class="btn haupt" data-wzauf="'+esc(rel)+'">In neuem Tab öffnen</button></div>'+
       '<details class="klapp" style="margin-top:8px"><summary>Quelltext</summary>'+
       '<div class="inh"><pre>'+esc(f.text)+'</pre></div></details>';
   }
@@ -1806,7 +1859,7 @@ function zeichne(){
   if(pr&&pr.config.farbe) document.documentElement.style.setProperty("--akz",pr.config.farbe);
   zeichneSpz(); zeichneReiter();
   const V={_start:vStart,_eingang:vEingang,_ent:vEnt,_dateien:vDateien,_meins:vMeins,_waechter:vWaechter,_repo:vRepo,
-    _bericht:vBericht,_neu:vNeu,_config:vConfig,_merge:vMerge};
+    _bericht:vBericht,_neu:vNeu,_config:vConfig,_merge:vMerge,_werkzeuge:vWerkzeuge};
   $("#main").innerHTML=(V[S.tab]||vStart)();
   binde();
   /* Fix 3: nur beim echten Wechsel nach oben. Sonst sprang die Seite
@@ -1833,8 +1886,9 @@ function binde(){
     pr.schnipsel.splice(+b.dataset.del,1); sichern(); zeichne();});
   m.querySelectorAll("[data-farbe]").forEach(b=>b.onclick=()=>{
     pr.config.farbe=b.dataset.farbe; configSchreiben(pr); sichern(); zeichne();});
-  const wz=$("#wzRahmen");
-  if(wz&&pr&&S.datei&&pr.files[S.datei]) wz.srcdoc=pr.files[S.datei].text;
+  m.querySelectorAll("[data-wzauf]").forEach(b=>b.onclick=()=>werkzeugOeffnen(b.dataset.wzauf));
+  m.querySelectorAll("[data-wzdat]").forEach(b=>b.onclick=()=>{
+    S.tab="_dateien"; S.datei=b.dataset.wzdat; zeichne();});
   m.querySelectorAll("[data-eiok]").forEach(b=>b.onclick=()=>{
     eingUebernehmen(b.dataset.eiok); sichern(); zeichne(); toast("Übernommen"); });
   m.querySelectorAll("[data-einein]").forEach(b=>b.onclick=()=>{
@@ -2221,23 +2275,60 @@ function dlgProjekt(){
     $("#dpZu").onclick=zuDlg;});
 }
 
+/* ================= Menue (T28) =================
+   anm.05: die Knopfreihe war zusammengewuerfelt und ohne Erklaerung.
+   Jetzt fuenf Bereiche, jeder Punkt mit einer Zeile Klartext darunter
+   (ent.alles.erklaert). anm.04 und anm.08: Config, Waechter, Bericht und
+   die Verwaltung sitzen in einem gemeinsamen Bereich und nicht mehr als
+   Reiter in der Leiste. */
+function mPunkt(id,label,text,haupt){
+  return `<button class="btn${haupt?" haupt":""}" id="${id}" style="width:100%;text-align:left">${label}</button>
+    <div class="dim" style="font-size:11px;line-height:1.4;margin:3px 2px 9px">${text}</div>`;
+}
+function mBereich(titel,inhalt,offen){
+  return `<details class="klapp"${offen?" open":""}><summary>${titel}</summary>
+    <div class="inh">${inhalt}</div></details>`;
+}
 function dlgMenu(){
-  const n=ghOffen().length;
+  const n=ghOffen().length, alle=ghOffen(true).length, pr=P();
+  const wach=pr?waechter(pr).length:0;
   dialog(`<h3>Menü</h3>
-    <div class="reihe"><button class="btn haupt" id="mSync">${n?("Senden ("+n+")"):"Mit GitHub abgleichen"}</button></div>
-    <div class="reihe"><button class="btn" id="mGh">Verbindung</button>
-    <button class="btn" id="mExp">Export ZIP</button></div>
-    <div class="reihe" style="margin-top:6px"><button class="btn" id="mAend">Paket einlesen</button>
-    <button class="btn" id="mOrd">Ordner wählen</button></div>
-    <div class="reihe" style="margin-top:6px"><button class="btn" id="mAlle">Alles senden (${ghOffen(true).length})</button>
-    ${REST.length?`<button class="btn" id="mRest">Rest senden (${REST.length})</button>`:""}</div>
-    <div class="dim" style="font-size:11.5px;line-height:1.45;margin:2px 0 9px">Schiebt <b>jede</b> Datei ins Repository, auch unveränderte.
-    Für den ersten Stand, wenn Dateien aus ZIPs stammen und dem Repository noch unbekannt sind.
-    Die Fassung im Repository wird dabei durch die hiesige ersetzt.</div>
-    <div class="reihe" style="margin-top:6px"><button class="btn" id="mTest">Tests</button>
-    <button class="btn" id="mRepo">Repo öffnen</button></div>
-    <div class="reihe"><button class="btn" id="mSess">Session-Ende</button>
-    <button class="btn" id="mZu">Schließen</button></div>`,()=>{
+
+    ${mBereich("1 · Projekt",
+      mPunkt("mProj","Projekt wählen","Zwischen geladenen Projekten wechseln oder ein neues anlegen.")+
+      mPunkt("mAend","Paket einlesen","Eine ZIP mit Änderungen laden. Sie landet im Eingang und wird dort einzeln übernommen oder verworfen.")+
+      mPunkt("mOrd","Ordner wählen","Einen Ordner vom Gerät laden. Der ganze Baum kommt mit, bestehende Dateien werden zusammengeführt, nicht ersetzt.")+
+      mPunkt("mExp","Export ZIP","Den hiesigen Stand als ZIP sichern. Vorher lässt sich auswählen, welche Bereiche und Dateiarten mitkommen."),true)}
+
+    ${mBereich("2 · Abgleich mit GitHub",
+      mPunkt("mSync",n?("Senden ("+n+")"):"Mit GitHub abgleichen",
+        n?("Schiebt die "+n+" geänderten Dateien ins Repository."):"Holt den Stand aus dem Repository. Es liegt nichts Ungesendetes an.",true)+
+      mPunkt("mAlle","Alles senden ("+alle+")","Schiebt <b>jede</b> Datei ins Repository, auch unveränderte. Für den ersten Stand, wenn Dateien aus ZIPs stammen und dem Repository noch unbekannt sind. Die Fassung im Repository wird dabei durch die hiesige ersetzt.")+
+      (REST.length?mPunkt("mRest","Rest senden ("+REST.length+")","Ein abgebrochener Sendevorgang hat "+REST.length+" Dateien liegen lassen. Das schiebt nur diese nach."):"")+
+      mPunkt("mGh","Verbindung","Zugangsschlüssel, Repository und Zweig einstellen und die Verbindung prüfen."))}
+
+    ${mBereich("3 · Prüfen",
+      mPunkt("mTest","Tests","Die eingebauten Selbsttests laufen lassen. Zeigt, was im Werkzeug gerade nicht tut, was es soll.")+
+      mPunkt("mWach","Wächter"+(wach?" ("+wach+")":""),"Sucht gesperrte Begriffe und Widersprüche in den Projektdateien"+(wach?". Zurzeit "+wach+" Fundstellen.":". Zurzeit ohne Fund."))+
+      mPunkt("mBer","Bericht","Der Gesamtstand des Projekts in Zahlen: Dateien, Entscheidungen, offene Punkte, letzte Änderungen."))}
+
+    ${mBereich("4 · Einstellungen und Verwaltung",
+      mPunkt("mCfg","Config","Projektname, Akzentfarbe und die Voreinstellungen für den Export. Wird nach <code>00_Config/config.json</code> geschrieben.")+
+      mPunkt("mRepos","Repos ansehen","Beide Repositories im Überblick: Dateibaum, Größe und Stand von Werkzeug und Daten.")+
+      mPunkt("mRepo","Repo im Browser öffnen","Öffnet das Datenrepository auf github.com in einem neuen Tab."))}
+
+    ${mBereich("5 · Hilfe und Abschluss",
+      mPunkt("mNeu","Was ist neu","Was sich in den letzten Fassungen geändert hat.")+
+      mPunkt("mSess","Session-Ende","Schreibt Offenes, Notizen und Änderungen dieser Sitzung nach <code>08_Sessions/</code>.")+
+      `<div class="dim" style="font-size:11px;margin:2px 2px 9px">Stand: <b>${esc(VERSION)}</b> · ${esc(DATUM)}</div>`)}
+
+    <div class="reihe"><button class="btn" id="mZu" style="width:100%">Schließen</button></div>`,()=>{
+      $("#mProj").onclick=()=>{ zuDlg(); dlgProjekt(); };
+      $("#mWach").onclick=()=>{ zuDlg(); S.tab="_waechter"; S.datei=null; zeichne(); };
+      $("#mBer").onclick=()=>{ zuDlg(); S.tab="_bericht"; S.datei=null; zeichne(); };
+      $("#mCfg").onclick=()=>{ zuDlg(); S.tab="_config"; S.datei=null; zeichne(); };
+      $("#mRepos").onclick=()=>{ zuDlg(); S.tab="_repo"; S.datei=null; zeichne(); };
+      $("#mNeu").onclick=()=>{ zuDlg(); S.tab="_neu"; S.datei=null; zeichne(); };
       $("#mSync").onclick=()=>{ zuDlg(); if(ghOffen().length) ghSchieben(); else ghZiehen(); };
       $("#mAlle").onclick=()=>{ const n=ghOffen(true).length; zuDlg();
         if(!n){ toast("Keine Dateien geladen"); return; }
