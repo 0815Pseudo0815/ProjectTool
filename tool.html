@@ -219,7 +219,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T28", DATUM="2026-08-21";
+const VERSION="T29", DATUM="2026-08-21";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -345,12 +345,17 @@ function laufZeichne(){
 }
 function warte(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
-/* Wiederholt bei Netzaussetzern. Andere Fehler (Token, Konflikt)
-   werden NICHT wiederholt — die gehen auch beim zweiten Mal schief. */
+/* Wiederholt bei Netzaussetzern. Andere Fehler (Token, fehlendes Recht)
+   werden NICHT wiederholt — die gehen auch beim zweiten Mal schief.
+   T29: der Ref-Konflikt aus bug.409.repo.leer kommt dazu. Er entsteht,
+   weil beim Senden mehrere Schreibvorgaben kurz hintereinander laufen und
+   die Ref draussen noch nicht nachgezogen ist; beim zweiten Versuch ist
+   sie es meist. Bisher fing das nur die 20-Sekunden-Schleife in ghAuto ab. */
 function netzFehler(e){
   const m=String(e&&e.message||"");
   return m.indexOf("Keine Verbindung")>=0 || m.indexOf("Limit erreicht")>=0
-      || m.indexOf("GitHub meldet 5")>=0;
+      || m.indexOf("GitHub meldet 5")>=0
+      || m.indexOf("Repository hat sich zwischendurch geaendert")>=0;
 }
 async function mitWiederholung(fn,versuche){
   versuche=versuche||3;
@@ -379,7 +384,16 @@ async function ghRuf(pfad,opt){
   if(r.status===401) throw new Error("Token abgelehnt oder abgelaufen");
   if(r.status===403) throw new Error("Kein Schreibrecht oder Limit erreicht");
   if(r.status===404) throw new Error("Nicht gefunden: "+pfad);
-  if(r.status===409) throw new Error("Repository ist leer");
+  if(r.status===409){
+    /* bug.409.repo.leer, behoben T29: 409 hiess hier fest "Repository ist
+       leer". GitHub schickt 409 aber auch, wenn die Branch-Ref beim PUT
+       nicht mehr aktuell ist — Sebastian sah die Meldung am 2026-08-20
+       bei einem 49 MB grossen Repository. Lesend kann 409 tatsaechlich
+       nur ein leeres Repository bedeuten; schreibend ist es ein Konflikt. */
+    throw new Error((opt.method&&opt.method!=="GET")
+      ? "Repository hat sich zwischendurch geaendert"
+      : "Repository ist leer");
+  }
   if(r.status===422) throw new Error("Abgelehnt — Datei wurde inzwischen geaendert");
   if(!r.ok) throw new Error("GitHub meldet "+r.status);
   return r;
@@ -718,6 +732,19 @@ function jetzt(){
 const stamp=()=>{const d=new Date(),p=n=>String(n).padStart(2,"0");
   return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"_"+p(d.getHours())+"-"+p(d.getMinutes());};
 const heute=()=>jetzt().slice(0,10);
+/* bug.zeit.utc, behoben T29: die Statuszeile schnitt die Uhrzeit mit
+   slice(11,16) roh aus dem Zeitstempel. Bei einem Stempel ohne Zonenangabe
+   oder mit Z am Ende steht dort UTC — Sebastian sah 21:15, seine Uhr zeigte
+   23:15. jetzt() schreibt heute zwar schon mit Zonenversatz, gespeicherte
+   Staende aus aelteren Fassungen tun das aber nicht. uhr() parst den Stempel
+   und rechnet ihn auf die Uhr des Geraets, damit beides stimmt. */
+function uhr(s){
+  if(!s) return "";
+  const d=new Date(s);
+  if(isNaN(d)) return String(s).slice(11,16);
+  const p=n=>String(n).padStart(2,"0");
+  return p(d.getHours())+":"+p(d.getMinutes());
+}
 function toast(t){ if(TOAST)TOAST.remove();
   TOAST=document.createElement("div"); TOAST.className="toast"; TOAST.textContent=t;
   document.body.appendChild(TOAST); setTimeout(()=>{if(TOAST){TOAST.remove();TOAST=null;}},1900); }
@@ -1347,7 +1374,7 @@ function zeichneSpz(){
     :(!GH.an?("Verbindung gestört — "+esc(GH.fehler||"unbekannt"))
     :(offen?"Änderungen gehen gleich raus":"Alles im Repository gesichert"))));
   el.innerHTML='<span class="punkt '+kl+'"></span><span id="spzTxt" style="cursor:pointer;text-decoration:underline dotted">'+tx+'</span>'+
-    ' <span class="dim" id="spzZeit">'+(GH.letzte?GH.letzte.slice(11,16):"")+'</span>'+
+    ' <span class="dim" id="spzZeit">'+(GH.letzte?uhr(GH.letzte):"")+'</span>'+
     '<button class="mini" id="spzSync" style="margin-left:auto">'+(n?"Senden":"Abgleichen")+'</button>';
   const c=$("#spzSync");
   if(c) c.onclick=()=>{ if(ghOffen().length) ghSchieben(); else ghZiehen(); };
@@ -1762,7 +1789,7 @@ function vConfig(){
     <p class="dim" style="font-size:12px">Name ${esc(pr.name)} · Ordner ${esc(pr.dir)} · ${Object.keys(pr.files).length} Dateien</p></div>
     <div class="card"><b>Speichern</b>
     <p class="dim" style="font-size:12px">${GH.token&&GH.repo
-      ? (GH.an?("Repository "+esc(GH.repo)+", Zweig "+esc(GH.zweig)+"."+(GH.letzte?" Zuletzt abgeglichen "+GH.letzte.slice(11,16)+".":""))
+      ? (GH.an?("Repository "+esc(GH.repo)+", Zweig "+esc(GH.zweig)+"."+(GH.letzte?" Zuletzt abgeglichen "+uhr(GH.letzte)+".":""))
              :("Verbindung gestört: "+esc(GH.fehler||"unbekannt")))
       : "Noch nicht verbunden. Bis dahin liegt alles nur in diesem Browser."}</p>
     <div class="reihe"><button class="btn haupt" id="cfgGh">Verbindung</button>
@@ -2048,7 +2075,7 @@ function quadDaten(){
     meins: pr?pr.schnipsel.length:0,
     tests: testStand(pr),
     version: VERSION,
-    letzte: GH.letzte?GH.letzte.slice(11,16):"—"
+    letzte: GH.letzte?uhr(GH.letzte):"—"
   };
 }
 /* T26: plan.statusquadrat verlangt Testergebnisse je Pruefpunkt. Fehlte. */
