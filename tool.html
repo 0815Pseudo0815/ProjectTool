@@ -229,7 +229,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T30", DATUM="2026-08-21";
+const VERSION="T31", DATUM="2026-08-21";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -255,7 +255,7 @@ const VERWORFEN="99_Archiv/_verworfen/";
    unter _ProjectTool/stand.json und wird nie als Projektdatei behandelt. */
 const STANDDIR="_ProjectTool/";
 const STANDREL=STANDDIR+"stand.json";
-let GH={token:"",repo:"",zweig:"main",an:false,fehler:"",letzte:null,baum:null,kurz:false};
+let GH={token:"",repo:"",zweig:"main",an:false,fehler:"",letzte:null,baum:null,kurz:false,diag:[]};
 
 let PROJ={}, CUR=null, PENDING=null, TOAST=null;
 let S={tab:"_start", datei:null, filter:"", entFilter:"alle", entSuche:"", entAnsicht:"liste"};
@@ -388,28 +388,60 @@ async function mitWiederholung(fn,versuche){
 function ghMerken(){
   try{ localStorage.setItem("pt_gh",JSON.stringify({token:GH.token,repo:GH.repo,zweig:GH.zweig})); }catch(e){}
 }
+/* T31: Bis T30 warf ghRuf nur einen kurzen Satz. Der Grund — HTTP-Status,
+   Pfad, Methode und der Klartext von GitHub — ging verloren, und ghAuto
+   schluckte den Rest still. Seither traegt jeder Fehler seine Herkunft mit
+   sich und landet zusaetzlich in GH.diag. Die Meldungstexte bleiben
+   unveraendert, weil netzFehler() per indexOf darauf prueft. */
+function ghNotiz(e){
+  GH.diag=GH.diag||[];
+  GH.diag.unshift({zeit:jetzt(),status:e.status||0,methode:e.methode||"",
+    pfad:e.pfad||"",meldung:e.message||"",detail:e.detail||""});
+  if(GH.diag.length>12) GH.diag.length=12;
+}
+function ghErr(msg,status,pfad,meth,detail){
+  const e=new Error(msg);
+  e.status=status||0; e.pfad=pfad||""; e.methode=meth||""; e.detail=detail||"";
+  ghNotiz(e);
+  return e;
+}
+function ghDiagZeile(d){
+  return (d.zeit||"")+"  "+(d.status||"—")+" "+(d.methode||"")+" "+(d.pfad||"")
+    +"\n  "+(d.meldung||"")+(d.detail?("\n  GitHub: "+d.detail):"");
+}
 async function ghRuf(pfad,opt){
   opt=opt||{};
+  const meth=opt.method||"GET";
   const h=Object.assign({"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"},opt.headers||{});
   if(GH.token) h["Authorization"]="Bearer "+GH.token;
   let r;
-  try{ r=await fetch(GHAPI+pfad,{method:opt.method||"GET",headers:h,body:opt.body}); }
-  catch(e){ throw new Error("Keine Verbindung zum Netz"); }
-  if(r.status===401) throw new Error("Token abgelehnt oder abgelaufen");
-  if(r.status===403) throw new Error("Kein Schreibrecht oder Limit erreicht");
-  if(r.status===404) throw new Error("Nicht gefunden: "+pfad);
+  try{ r=await fetch(GHAPI+pfad,{method:meth,headers:h,body:opt.body}); }
+  catch(e){ throw ghErr("Keine Verbindung zum Netz",0,pfad,meth,String(e&&e.message||"")); }
+  let klar="";
+  if(!r.ok){
+    let roh=""; try{ roh=await r.clone().text(); }catch(e){}
+    try{ klar=String((JSON.parse(roh)||{}).message||"").slice(0,300); }
+    catch(e){ klar=String(roh||"").slice(0,200); }
+    if(r.status===403){
+      const rest=r.headers.get("x-ratelimit-remaining");
+      if(rest!==null) klar+=(klar?" | ":"")+"Limit uebrig: "+rest;
+    }
+  }
+  if(r.status===401) throw ghErr("Token abgelehnt oder abgelaufen",401,pfad,meth,klar);
+  if(r.status===403) throw ghErr("Kein Schreibrecht oder Limit erreicht",403,pfad,meth,klar);
+  if(r.status===404) throw ghErr("Nicht gefunden: "+pfad,404,pfad,meth,klar);
   if(r.status===409){
     /* bug.409.repo.leer, behoben T29: 409 hiess hier fest "Repository ist
        leer". GitHub schickt 409 aber auch, wenn die Branch-Ref beim PUT
        nicht mehr aktuell ist — Sebastian sah die Meldung am 2026-08-20
        bei einem 49 MB grossen Repository. Lesend kann 409 tatsaechlich
        nur ein leeres Repository bedeuten; schreibend ist es ein Konflikt. */
-    throw new Error((opt.method&&opt.method!=="GET")
+    throw ghErr(meth!=="GET"
       ? "Repository hat sich zwischendurch geaendert"
-      : "Repository ist leer");
+      : "Repository ist leer",409,pfad,meth,klar);
   }
-  if(r.status===422) throw new Error("Abgelehnt — Datei wurde inzwischen geaendert");
-  if(!r.ok) throw new Error("GitHub meldet "+r.status);
+  if(r.status===422) throw ghErr("Abgelehnt — Datei wurde inzwischen geaendert",422,pfad,meth,klar);
+  if(!r.ok) throw ghErr("GitHub meldet "+r.status,r.status,pfad,meth,klar);
   return r;
 }
 async function ghVerbinden(){
@@ -655,8 +687,13 @@ async function ghAuto(){
     GH.letzte=jetzt(); GH.autoFehler="";
     try{ await dbSetz("kv","stand",standObjekt()); }catch(e){}
   }catch(e){
-    /* Nicht laut werden. Merken, spaeter erneut versuchen. */
-    GH.autoFehler=e.message||"unbekannt";
+    /* T31: still bleibt es weiterhin, aber nicht mehr blind. Status, Pfad
+       und der Klartext von GitHub stehen jetzt in der Meldung; die volle
+       Liste liegt in GH.diag und ist ueber die Statuszeile abrufbar. */
+    if(!e.status&&!e.pfad) ghNotiz(e);
+    GH.autoFehler=(e.message||"unbekannt")
+      +(e.status?(" ["+e.status+"]"):"")
+      +(e.detail?(" — "+e.detail):"");
     ghPause=Date.now()+20000;
     clearTimeout(ghTimer); ghTimer=setTimeout(ghAuto,20000);
   }finally{ ghLaeuft=false; zeichneSpz(); zeichneReiter(); }
@@ -1575,8 +1612,8 @@ function zeichneSpz(){
   const kl=!GH.token||!GH.repo?"p-rot":(GH.autoFehler?"p-rot":(GH.an?(offen?"p-gelb":"p-gruen"):"p-rot"));
   const tx=!GH.token||!GH.repo?"Nicht mit GitHub verbunden"
     :(ghLaeuft?"Sendet …"
-    :(GH.autoFehler?("Senden gestört — "+esc(GH.autoFehler)+", versucht es erneut")
-    :(!GH.an?("Verbindung gestört — "+esc(GH.fehler||"unbekannt"))
+    :(GH.autoFehler?("Senden gestört — "+esc(GH.autoFehler)+" · antippen für den Grund")
+    :(!GH.an?("Verbindung gestört — "+esc(GH.fehler||"unbekannt")+" · antippen für den Grund")
     :(offen?"Änderungen gehen gleich raus":"Alles im Repository gesichert"))));
   el.innerHTML='<span class="punkt '+kl+'"></span><span id="spzTxt" style="cursor:pointer;text-decoration:underline dotted">'+tx+'</span>'+
     ' <span class="dim" id="spzZeit">'+(GH.letzte?uhr(GH.letzte):"")+'</span>'+
@@ -2221,8 +2258,22 @@ function dlgSpzErklaerung(){
   else if(!GH.an) lage="Die Verbindung zum Repository steht nicht: "+(GH.fehler||"Grund unbekannt")+".";
   else if(offen) lage="Es gibt Änderungen, die noch nicht im Repository liegen"+(n?" ("+n+" Dateien)":"")+". Sie gehen in den nächsten Sekunden von selbst raus.";
   else lage="Alles, was hier liegt, liegt auch im Repository. Nichts zu tun.";
+  /* T31: die letzten Vorfaelle im Klartext. Ohne sie war jeder gescheiterte
+     Abgleich Ratearbeit — die Statuszeile zeigte nur den kurzen Satz. */
+  const d=(GH.diag||[]);
+  const diagTxt=d.length?d.map(ghDiagZeile).join("\n\n"):"";
+  const diagBlock=d.length?`<div style="margin-top:12px">
+      <b style="font-size:12px">Letzte ${d.length} Vorfälle</b>
+      <pre id="spzDiag" style="white-space:pre-wrap;word-break:break-word;font-size:10.5px;
+        line-height:1.45;max-height:210px;overflow:auto;margin:6px 0 0;padding:8px;
+        border:1px solid var(--rand,#444);border-radius:6px">${esc(diagTxt)}</pre>
+      <div class="reihe" style="margin-top:6px">
+        <button class="btn" id="spzKop">Kopieren</button>
+        <button class="btn" id="spzLeer">Liste leeren</button></div></div>`
+    :`<div class="dim" style="font-size:11.5px;margin-top:12px">Bisher kein Fehler aufgetreten.</div>`;
   dialog(`<h3>Was heißt das?</h3>
     <div class="dim" style="font-size:12.5px;line-height:1.6">${esc(lage)}</div>
+    ${diagBlock}
     <div class="dim" style="font-size:11.5px;line-height:1.55;margin-top:10px">
     <b>Nur lokal</b> heißt: die Änderung steht in diesem Browser, nicht im Repository.
     Der Browser darf seinen Speicher jederzeit aufräumen — dann wäre sie verloren.
@@ -2231,7 +2282,20 @@ function dlgSpzErklaerung(){
     <div class="reihe" style="margin-top:10px">
       <button class="btn" onclick="zuDlg();S.tab='_repo';zeichne()">Repos ansehen</button>
       <button class="btn" id="seZu">Schließen</button></div>`,
-    ()=>{ $("#seZu").onclick=zuDlg; });
+    ()=>{ $("#seZu").onclick=zuDlg;
+      const k=$("#spzKop");
+      if(k) k.onclick=async()=>{
+        try{ await navigator.clipboard.writeText(diagTxt); toast("Kopiert"); }
+        catch(e){
+          const p=$("#spzDiag");
+          if(p){ const s=getSelection(),r=document.createRange();
+            r.selectNodeContents(p); s.removeAllRanges(); s.addRange(r); }
+          toast("Markiert — von Hand kopieren");
+        }
+      };
+      const l=$("#spzLeer");
+      if(l) l.onclick=()=>{ GH.diag=[]; zuDlg(); zeichneSpz(); };
+    });
 }
 
 /* ================= Entscheidungen bearbeiten (T26) =================
