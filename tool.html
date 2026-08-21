@@ -110,6 +110,16 @@ details.klapp .inh{padding:0 12px 12px}
   border-radius:6px;color:var(--txt);cursor:pointer}
 
 /* Entscheidungen */
+.fbfrage{font-size:19px;line-height:1.3;font-weight:800;margin:0 0 9px}
+.fberk{font-size:13px;line-height:1.5;white-space:pre-wrap;margin-bottom:12px}
+.fbmeta{font-size:11px;color:var(--dim);margin-bottom:8px}
+.fbopt{display:block;width:100%;text-align:left;padding:12px;margin:0 0 7px;min-height:44px;
+  background:var(--card);border:1px solid var(--lin);border-radius:9px;color:var(--txt)}
+.fbopt.gewaehlt{border-color:var(--akz);background:rgba(255,255,255,.06)}
+.fbopt .ot{font-weight:700;font-size:14px}
+.fbopt .oe{font-size:11px;color:var(--dim);line-height:1.4;margin-top:4px}
+.fbbalken{height:5px;background:var(--card);border-radius:3px;overflow:hidden;margin:8px 0 12px}
+.fbbalken>div{height:100%;background:var(--akz)}
 .ent{border-left:2.5px solid var(--lin);background:var(--panel);border-radius:0 9px 9px 0;
   padding:9px 11px;margin-bottom:6px}
 .ent.s-final{border-left-color:var(--ok)}
@@ -219,7 +229,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T29", DATUM="2026-08-21";
+const VERSION="T30", DATUM="2026-08-21";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -248,7 +258,11 @@ const STANDREL=STANDDIR+"stand.json";
 let GH={token:"",repo:"",zweig:"main",an:false,fehler:"",letzte:null,baum:null,kurz:false};
 
 let PROJ={}, CUR=null, PENDING=null, TOAST=null;
-let S={tab:"_start", datei:null, filter:"", entFilter:"alle", entSuche:""};
+let S={tab:"_start", datei:null, filter:"", entFilter:"alle", entSuche:"", entAnsicht:"liste"};
+/* Fragebogen, sitzt im Reiterpunkt Entscheidungen (ent.fragebogen.unter.ent).
+   FB haelt nur Bedienzustand — die Daten stehen in entscheidungen.json. */
+const FB={fragen:[],i:0,art:"",gruppe:"",projekt:"",suche:"",laeuft:false,
+  auswahl:new Map(),kommentar:new Map(),hinten:new Set(),meldung:null};
 let fh=null, autoAn=false, speicherKann=("showSaveFilePicker" in window);
 let fhFrage=false, dauerhaft=false, dauerKann=!!(navigator.storage&&navigator.storage.persist);
 let bereit=false;
@@ -899,6 +913,197 @@ function entSchreiben(pr){
   if(!pr.ent) return;
   setzeDatei(pr,ENTPFAD,JSON.stringify(pr.ent,null,2));
   sichern();
+}
+/* ================= Fragebogen (T30) =================
+   Liegt im Reiterpunkt Entscheidungen, kein eigenes Werkzeug
+   (ent.fragebogen.unter.ent). Fragen und Antworten stehen getrennt
+   in 00_Entscheidungen/entscheidungen.json und sind ueber haengt_an
+   verknuepft (ent.frg.antwort.getrennt). Vertrag: vtr.frg.felder,
+   vtr.frg.funktionen, vtr.frg.oberflaeche. */
+const FRGSTATUS=["offen","beantwortet","zurueck"];
+function istFrage(e){ return e && typeof e.id==="string" && e.id.indexOf("frg.")===0; }
+function istAntwort(e){ return e && typeof e.id==="string" && e.id.indexOf("ant.")===0; }
+
+/* vtr.frg.funktionen: liefert die Fragen in Dateireihenfolge.
+   Beantwortete kommen mit, damit Antworten aenderbar bleiben
+   (bef.0821.frg.aendern). Fehler als Ausnahme mit Klartext. */
+async function ladeFragen(){
+  const pr=P();
+  if(!pr) throw new Error("Kein Projekt geladen.");
+  if(!pr.ent) throw new Error("Keine Entscheidungsdatei: "+ENTPFAD+" fehlt in diesem Projekt.");
+  return (pr.ent.eintraege||[]).filter(istFrage);
+}
+
+function antwortenZu(pr,frageId){
+  return (pr.ent.eintraege||[]).filter(e=>istAntwort(e)&&(e.haengt_an||[]).includes(frageId));
+}
+function letzteAntwort(pr,frageId){
+  const l=antwortenZu(pr,frageId);
+  return l.length?l[l.length-1]:null;
+}
+
+/* vtr.frg.funktionen: schreibt sofort. Die Antwort wird als EIGENER
+   Eintrag angehaengt, nie ueberschrieben; am Frageeintrag aendert sich
+   nur der Status. k=null heisst Ueberspringen mit Kommentar. */
+async function speichereAntwort(id,k,kommentar){
+  const pr=P();
+  if(!pr||!pr.ent) throw new Error("Keine Entscheidungsdatei geladen.");
+  const f=(pr.ent.eintraege||[]).find(e=>e.id===id);
+  if(!f) throw new Error("Frage nicht gefunden: "+id);
+  const zurueck = k==="x" || (Array.isArray(k)&&k.includes("x"));
+  const stempel=jetzt();
+  let aid="ant."+id.replace(/^frg\./,"")+"."+stempel.slice(0,19).replace(/[-:T]/g,"");
+  if(pr.ent.eintraege.some(e=>e.id===aid)){
+    let n=2; while(pr.ent.eintraege.some(e=>e.id===aid+"."+n)) n++;
+    aid=aid+"."+n;
+  }
+  const a={id:aid, bereich:f.bereich||"Fragebogen", status:"referenz",
+    text:(k===null?"uebersprungen mit Kommentar":"Antwort "+(Array.isArray(k)?k.join(", "):k))+" auf "+id,
+    antwort:k, antwort_datum:stempel, kommentar:kommentar||"",
+    haengt_an:[id], datum:heute(), quelle:"Fragebogen"};
+  pr.ent.eintraege.push(a);
+  f.status = k===null ? "offen" : (zurueck ? "zurueck" : "beantwortet");
+  pr.log.push({t:stempel,art:"neu",datei:ENTPFAD});
+  entSchreiben(pr);
+  return a;
+}
+
+function fbListe(){
+  let l=FB.fragen.filter(f=>{
+    if(FB.art && f.art!==FB.art) return false;
+    if(FB.gruppe && f.gruppe!==FB.gruppe) return false;
+    if(FB.projekt && f.projekt!==FB.projekt) return false;
+    const q=FB.suche.trim().toLowerCase();
+    if(q && !((f.text||"")+"\n"+(f.erklaerung||"")).toLowerCase().includes(q)) return false;
+    return true;
+  });
+  /* bef.0821.frg.skip.sprung: ans Ende geschoben wird nur die Anzeige,
+     die Datei bleibt unberuehrt. */
+  const h=[...l].filter(f=>FB.hinten.has(f.id));
+  return l.filter(f=>!FB.hinten.has(f.id)).concat(h);
+}
+function fbAktuell(){
+  const l=fbListe();
+  if(FB.i<0) FB.i=0;
+  if(FB.i>=l.length) FB.i=Math.max(0,l.length-1);
+  return l[FB.i]||null;
+}
+function fbOptionen(f){ return Array.isArray(f.optionen)?f.optionen:[]; }
+function fbWahl(f){
+  let s=FB.auswahl.get(f.id);
+  if(f.mehrfach){ if(!(s instanceof Set)) s=new Set(Array.isArray(s)?s:(s==null?[]:[s])); return s; }
+  if(s instanceof Set) s=[...s][0]||null;
+  if(s===undefined){ const a=letzteAntwort(P(),f.id); s=a&&a.antwort!==null?a.antwort:null; }
+  return s;
+}
+function fbKomm(f){
+  if(FB.kommentar.has(f.id)) return FB.kommentar.get(f.id);
+  const a=letzteAntwort(P(),f.id);
+  return a?(a.kommentar||""):"";
+}
+function fbKlick(f,k){
+  if(FB.laeuft) return;
+  if(f.mehrfach){
+    let s=fbWahl(f); if(!(s instanceof Set)) s=new Set();
+    if(k==="x"){ s.clear(); s.add("x"); }
+    else { s.delete("x"); if(s.has(k)) s.delete(k); else s.add(k); }
+    FB.auswahl.set(f.id,s);
+  } else FB.auswahl.set(f.id,k);
+  zeichne();
+}
+function fbWerte(){
+  const fs=FB.fragen;
+  return {art:[...new Set(fs.map(f=>f.art).filter(Boolean))],
+    gruppe:[...new Set(fs.map(f=>f.gruppe).filter(Boolean))],
+    projekt:[...new Set(fs.map(f=>f.projekt).filter(Boolean))]};
+}
+async function fbSenden(f,k){
+  if(FB.laeuft) return;
+  FB.laeuft=true; zeichne();
+  try{
+    await speichereAntwort(f.id,k,fbKomm(f));
+    const zurueck = k==="x" || (Array.isArray(k)&&k.includes("x"));
+    if(k===null){ FB.hinten.add(f.id); FB.meldung={art:"ok",text:"Kommentar gespeichert, Frage bleibt offen."}; }
+    else if(zurueck){ FB.hinten.add(f.id); FB.meldung={art:"ok",text:"Zurück an den Fragesteller."}; }
+    else FB.meldung={art:"ok",text:"Antwort gespeichert."};
+    FB.auswahl.delete(f.id); FB.kommentar.delete(f.id);
+    toast(FB.meldung.text);
+  }catch(e){
+    FB.meldung={art:"err",text:(e&&e.message)||String(e)};
+    toast("Fehler: "+FB.meldung.text);
+  }finally{ FB.laeuft=false; zeichne(); }
+}
+/* bef.0821.frg.skip.meldung und .sprung: ohne Kommentar wird nichts
+   gespeichert und der Zeiger bleibt stehen, weil die Frage ans Ende
+   rutscht und die naechste auf denselben Platz nachrueckt. */
+function fbUeberspringen(f){
+  if(FB.laeuft) return;
+  const k=fbKomm(f);
+  if(!k.trim()){
+    FB.hinten.add(f.id);
+    FB.meldung={art:"warn",text:"Frage ans Ende geschoben, nichts gespeichert."};
+    zeichne(); return;
+  }
+  fbSenden(f,null);
+}
+function fbFilterKnopf(text,feld,wert){
+  const an=FB[feld]===wert;
+  return `<button class="btn ${an?"haupt":""}" data-fbf="${esc(feld)}" data-fbv="${esc(wert)}" style="font-size:11.5px;padding:7px 10px">${esc(text)}</button>`;
+}
+function vFragebogen(){
+  const pr=P();
+  try{ FB.fragen=(pr.ent.eintraege||[]).filter(istFrage); }catch(e){ FB.fragen=[]; }
+  if(!FB.fragen.length) return `<div class="card"><b>Keine Fragen</b>
+    <p class="dim">In ${ENTPFAD} steht kein Eintrag mit der Kennung frg. — der Fragebogen bleibt leer, bis Fragen abgelegt sind.</p></div>`;
+  const liste=fbListe(), f=fbAktuell();
+  const w=fbWerte();
+  const offen=FB.fragen.filter(x=>String(x.status||"offen")!=="beantwortet").length;
+  let h=`<div class="card">
+    <input type="search" id="fbS" placeholder="Suche in Frage und Erklärung" value="${esc(FB.suche)}" style="margin-bottom:8px">
+    <div class="reihe">${fbFilterKnopf("Alle Arten","art","")}`;
+  w.art.forEach(x=>h+=fbFilterKnopf(x,"art",x));
+  h+=`</div><div class="reihe">${fbFilterKnopf("Alle Gruppen","gruppe","")}`;
+  w.gruppe.forEach(x=>h+=fbFilterKnopf(x,"gruppe",x));
+  h+=`</div><div class="reihe">${fbFilterKnopf("Alle Projekte","projekt","")}`;
+  w.projekt.forEach(x=>h+=fbFilterKnopf(x,"projekt",x));
+  h+=`</div><div class="dim" style="font-size:11.5px">${liste.length?(FB.i+1)+" von "+liste.length:"0 von 0"} · ${offen} noch offen</div>
+    <div class="fbbalken"><div style="width:${liste.length?((FB.i+1)/liste.length*100):0}%"></div></div></div>`;
+  if(!f) return h+`<div class="card dim">Nichts gefunden.</div>`;
+  const wahl=fbWahl(f), komm=fbKomm(f), st=String(f.status||"offen");
+  let oh="";
+  fbOptionen(f).forEach(o=>{
+    const an=f.mehrfach?(wahl instanceof Set&&wahl.has(o.k)):wahl===o.k;
+    oh+=`<button class="fbopt ${an?"gewaehlt":""}" data-fbo="${esc(o.k)}">
+      <div class="ot">${esc(o.text)}</div>
+      ${o.erklaerung?`<div class="oe">${esc(o.erklaerung)}</div>`:""}</button>`;
+  });
+  const kannAntworten=f.art!=="offen";
+  const hatWahl=f.mehrfach?(wahl instanceof Set&&wahl.size>0):!!wahl;
+  const a=letzteAntwort(pr,f.id);
+  h+=`<div class="card">
+    <div class="fbmeta">${esc(f.gruppe||"")}${f.projekt?" · "+esc(f.projekt):""}${f.art?" · "+esc(f.art):""} · <span class="tag t-${esc(st)}">${esc(st)}</span></div>
+    <h2 class="fbfrage">${esc(f.text)}</h2>
+    ${f.erklaerung?`<div class="fberk">${esc(f.erklaerung)}</div>`:""}
+    ${oh}
+    <textarea id="fbK" placeholder="Kommentar (optional)" style="min-height:96px">${esc(komm)}</textarea>
+    ${a?`<div class="qu" style="margin-top:7px">zuletzt: ${esc(Array.isArray(a.antwort)?a.antwort.join(", "):String(a.antwort))} · ${esc(a.antwort_datum||"")} · ${antwortenZu(pr,f.id).length} Antwort(en) gespeichert</div>`:""}
+    ${FB.meldung?`<div class="dim" style="margin-top:7px;font-size:12px">${esc(FB.meldung.text)}</div>`:""}
+    <div class="reihe" style="margin-top:9px">
+      <button class="btn" id="fbZ" ${FB.i<=0||FB.laeuft?"disabled":""}>Zurück</button>
+      ${kannAntworten?`<button class="btn haupt" id="fbA" ${FB.laeuft||!hatWahl?"disabled":""}>${st==="beantwortet"?"Antwort ändern":"Antwort speichern"}</button>`:""}
+      <button class="btn" id="fbU" ${FB.laeuft?"disabled":""}>Überspringen</button>
+      <button class="btn" id="fbV" ${FB.i>=liste.length-1||FB.laeuft?"disabled":""}>Weiter</button>
+    </div>
+    ${f.art==="erklaerung"?`<div class="dim" style="margin-top:7px;font-size:11.5px">Die Optionen sind ein Angebot, die eigentliche Antwort steht im Kommentar.</div>`:""}
+    ${f.art==="offen"?`<div class="dim" style="margin-top:7px;font-size:11.5px">Offener Punkt ohne Antwortzwang.</div>`:""}
+  </div>`;
+  return h;
+}
+
+function fbAktuellSicher(){
+  if(S.tab!=="_ent"||S.entAnsicht!=="fragen") return null;
+  const pr=P(); if(!pr||!pr.ent) return null;
+  return fbAktuell();
 }
 function bereiche(pr){
   const m={};
@@ -1629,8 +1834,12 @@ function dlgGitHub(){
 
 function vEnt(){
   const pr=P(); if(!pr) return '<div class="card dim">Kein Projekt.</div>';
-  if(!pr.ent) return `<div class="card"><b>Keine Entscheidungsdatei</b>
+  const umschalter=`<div class="reihe" style="margin-bottom:8px">
+    <button class="btn ${S.entAnsicht!=="fragen"?"haupt":""}" data-entans="liste">Entscheidungen</button>
+    <button class="btn ${S.entAnsicht==="fragen"?"haupt":""}" data-entans="fragen">Fragebogen</button></div>`;
+  if(!pr.ent) return umschalter+`<div class="card"><b>Keine Entscheidungsdatei</b>
     <p class="dim">Erwartet wird ${ENTPFAD}. Sie ist die Wahrheit des Projekts — alle anderen Dateien sind abgeleitet.</p></div>`;
+  if(S.entAnsicht==="fragen") return umschalter+vFragebogen();
   const alle=pr.ent.eintraege||[];
   const bs=[...new Set(alle.map(e=>e.bereich))];
   let liste=alle;
@@ -1641,7 +1850,7 @@ function vEnt(){
     const q=S.entSuche.toLowerCase();
     liste=liste.filter(e=>(e.id+" "+e.text+" "+(e.grund||"")).toLowerCase().includes(q));
   }
-  let h=`<div class="reihe" style="margin-bottom:8px">
+  let h=umschalter+`<div class="reihe" style="margin-bottom:8px">
       <button class="btn haupt" id="entNeu">Neue Entscheidung</button></div>
     <input type="search" id="entS" placeholder="Suchen…" value="${esc(S.entSuche)}" style="margin-bottom:8px">
     <div class="reihe">`;
@@ -1904,6 +2113,26 @@ function binde(){
   const es=$("#entS"); if(es) es.oninput=()=>{S.entSuche=es.value;
     const p=es.selectionStart; zeichne(); const n=$("#entS"); if(n){n.focus();n.setSelectionRange(p,p);} };
   m.querySelectorAll("[data-f]").forEach(b=>b.onclick=()=>{S.entFilter=b.dataset.f;zeichne();});
+  m.querySelectorAll("[data-entans]").forEach(b=>b.onclick=()=>{
+    S.entAnsicht=b.dataset.entans; FB.meldung=null; zeichne();});
+  m.querySelectorAll("[data-fbf]").forEach(b=>b.onclick=()=>{
+    FB[b.dataset.fbf]=b.dataset.fbv; FB.i=0; FB.meldung=null; zeichne();});
+  const fbs=$("#fbS"); if(fbs) fbs.oninput=()=>{FB.suche=fbs.value; FB.i=0;
+    const p=fbs.selectionStart; zeichne(); const n=$("#fbS"); if(n){n.focus();n.setSelectionRange(p,p);} };
+  const fbf=fbAktuellSicher();
+  if(fbf){
+    m.querySelectorAll("[data-fbo]").forEach(b=>b.onclick=()=>fbKlick(fbf,b.dataset.fbo));
+    const fk=$("#fbK"); if(fk) fk.oninput=()=>FB.kommentar.set(fbf.id,fk.value);
+    const fz=$("#fbZ"); if(fz) fz.onclick=()=>{if(FB.i>0){FB.i--;FB.meldung=null;zeichne();}};
+    const fv=$("#fbV"); if(fv) fv.onclick=()=>{FB.i++;FB.meldung=null;zeichne();};
+    const fu=$("#fbU"); if(fu) fu.onclick=()=>fbUeberspringen(fbf);
+    const fa=$("#fbA"); if(fa) fa.onclick=()=>{
+      const w=fbWahl(fbf);
+      const k=fbf.mehrfach?[...(w instanceof Set?w:new Set())]:w;
+      if(fbf.mehrfach&&(!Array.isArray(k)||!k.length)) return;
+      if(!fbf.mehrfach&&!k) return;
+      fbSenden(fbf,k);};
+  }
   const eNeu=$("#entNeu"); if(eNeu) eNeu.onclick=()=>dlgEntForm(null);
   m.querySelectorAll("[data-entedit]").forEach(b=>b.onclick=()=>dlgEntForm(b.dataset.entedit));
   m.querySelectorAll("[data-entkomm]").forEach(b=>b.onclick=()=>{
