@@ -54,6 +54,12 @@ header{position:sticky;top:0;z-index:40;background:var(--bg);border-bottom:1px s
 .echo{padding:0 10px 8px;font-size:11.5px;color:var(--ok);min-height:0}
 .echo:empty{display:none}
 
+/* Bilderwerkzeug */
+.bldGitter{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:7px}
+.bldKachel{background:var(--panel);border:1px solid var(--lin);border-radius:9px;overflow:hidden;cursor:pointer}
+.bldVor{aspect-ratio:1/1;background:var(--card);display:flex;align-items:center;justify-content:center}
+.bldTxt{font-size:10px;padding:5px 6px 2px;word-break:break-all;line-height:1.25}
+.bldKat{font-size:9px;padding:0 6px 5px;color:var(--akz);word-break:break-all}
 /* Reiter */
 .reiter{display:flex;gap:3px;overflow-x:auto;padding:0 8px 7px;scrollbar-width:none}
 .reiter::-webkit-scrollbar{display:none}
@@ -219,7 +225,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T26", DATUM="2026-08-20";
+const VERSION="T27 12:36", DATUM="2026-08-21 12:36";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -1342,7 +1348,7 @@ function zeichneSpz(){
 }
 const TABS=[
   ["_start","Start"],["_eingang","Eingang"],["_ent","Entscheidungen"],["_dateien","Dateien"],["_meins","Meins"],
-  ["_waechter","Wächter"],["_repo","Repos"],["_bericht","Bericht"],["_neu","Was ist neu"],["_config","Config"]
+  ["_bilder","Bilder"],["_waechter","Wächter"],["_repo","Repos"],["_bericht","Bericht"],["_neu","Was ist neu"],["_config","Config"]
 ];
 function zeichneReiter(){
   const pr=P();
@@ -1354,6 +1360,8 @@ function zeichneReiter(){
       if(id==="_dateien") z=Object.keys(pr.files).length;
       if(id==="_meins") z=pr.schnipsel.length||"";
       if(id==="_waechter") z=waechter(pr).length||"";
+    }
+    if(id==="_bilder"){ z=(BILD.reg?bildAlle().length:"")||"";
     }
     return '<button data-tab="'+id+'" class="'+(S.tab===id?"an":"")+'">'+t+
       (z?'<span class="z">'+z+'</span>':"")+'</button>';
@@ -1783,6 +1791,362 @@ function vMerge(){
   return h;
 }
 
+/* ================= Bilderwerkzeug (T27) =================
+   Bilder liegen im Repository, nicht im Projektbestand: Pics/ in der Wurzel
+   und Pics/ in den Projektordnern. ghTeil() laesst alles ausserhalb von
+   Projects/ liegen, darum hat dieser Reiter einen eigenen Weg zum Baum.
+
+   Beschreibung, Kategorien und Projektzuordnung stehen in einem Register,
+   nicht im Dateinamen. So bleibt der Name frei und nichts geht beim
+   Umsortieren verloren.
+
+   Vorschauen liegen als kleine JPEG unter Pics/_thumbs/. Ohne sie muesste
+   das Handy fuer eine Galerie zwanzig Vollbilder ziehen. */
+const BILDREG="Pics/_bilder.json";
+const THUMBDIR="Pics/_thumbs/";
+const THUMBKANTE=320;
+let BILD={reg:null, laedt:false, fehler:"", thumbs:{}, voll:null, vollPfad:"",
+          sel:null, ordner:"", kat:"", suche:"", crop:null, neuPfad:""};
+
+function bildExt(p){ const i=p.lastIndexOf("."); return i<0?"":p.slice(i+1).toLowerCase(); }
+function bildMime(p){ const e=bildExt(p); return "image/"+(e==="jpg"?"jpeg":e); }
+function bildName(p){ return p.slice(p.lastIndexOf("/")+1); }
+function bildOrdner(p){ const i=p.lastIndexOf("/"); return i<0?"":p.slice(0,i); }
+function thumbPfad(p){ return THUMBDIR+p.replace(/\//g,"__")+".jpg"; }
+
+/* Alle Bilder im Repository, ausser den Vorschauen selbst. */
+function bildAlle(){
+  if(!GH.baum) return [];
+  return Object.keys(GH.baum)
+    .filter(p=>BILDEXT.includes(bildExt(p)) && !p.startsWith(THUMBDIR))
+    .sort();
+}
+function bildEintrag(p){
+  const r=(BILD.reg&&BILD.reg.bilder)||{};
+  return r[p]||{titel:"",beschreibung:"",kategorien:[],projekt:""};
+}
+function bildKategorien(){
+  const s=new Set();
+  Object.values((BILD.reg&&BILD.reg.bilder)||{}).forEach(e=>(e.kategorien||[]).forEach(k=>s.add(k)));
+  return [...s].sort();
+}
+function bildOrdnerListe(){
+  const s=new Set(bildAlle().map(bildOrdner));
+  return [...s].sort();
+}
+
+/* ---- Register ---- */
+async function bildRegLesen(){
+  const e=GH.baum&&GH.baum[BILDREG];
+  if(!e){ BILD.reg={schema:"bilder/1",aktualisiert:"",bilder:{}}; return; }
+  const u=await ghBlob(e.sha);
+  try{ BILD.reg=JSON.parse(new TextDecoder().decode(u)); }
+  catch(x){ BILD.reg={schema:"bilder/1",aktualisiert:"",bilder:{}}; BILD.fehler="Register unlesbar, neu begonnen"; }
+  if(!BILD.reg.bilder) BILD.reg.bilder={};
+}
+async function bildRegSchreiben(nachricht){
+  BILD.reg.aktualisiert=jetzt();
+  const u=new TextEncoder().encode(JSON.stringify(BILD.reg,null,1));
+  const alt=GH.baum&&GH.baum[BILDREG];
+  const sha=await ghSchreib(BILDREG,u,nachricht||"ProjectTool: Bildregister",alt&&alt.sha);
+  if(!GH.baum) GH.baum={};
+  GH.baum[BILDREG]={sha,size:u.length};
+}
+
+/* ---- Laden ---- */
+async function bildInit(){
+  if(BILD.laedt) return;
+  BILD.laedt=true; BILD.fehler="";
+  try{
+    if(!GH.an) await ghVerbinden();
+    if(!GH.an) throw new Error(GH.fehler||"Nicht verbunden");
+    await ghBaum();
+    await bildRegLesen();
+  }catch(e){ BILD.fehler=e.message; }
+  BILD.laedt=false; zeichne(); bildVorschauenNachladen();
+}
+async function bildBytes(p){
+  const e=GH.baum&&GH.baum[p];
+  if(!e) throw new Error("Nicht im Repository: "+p);
+  return await ghBlob(e.sha);
+}
+async function bildDatenUrl(p){
+  const u=await bildBytes(p);
+  return "data:"+bildMime(p)+";base64,"+b64Von(u);
+}
+/* Vorschauen einzeln nachziehen und direkt ins Bild setzen, ohne die ganze
+   Ansicht neu zu zeichnen. Fehlt eine Vorschau, bleibt die Kachel leer. */
+async function bildVorschauenNachladen(){
+  if(S.tab!=="_bilder"||BILD.sel) return;
+  for(const p of bildSicht()){
+    if(BILD.thumbs[p]) continue;
+    const tp=thumbPfad(p);
+    if(!(GH.baum&&GH.baum[tp])) continue;
+    try{
+      const u=await ghBlob(GH.baum[tp].sha);
+      BILD.thumbs[p]="data:image/jpeg;base64,"+b64Von(u);
+    }catch(e){ continue; }
+    const el=document.querySelector('[data-bildvor="'+CSS.escape(p)+'"]');
+    if(el) el.innerHTML='<img src="'+BILD.thumbs[p]+'" style="width:100%;height:100%;object-fit:cover;display:block">';
+    if(S.tab!=="_bilder") return;
+  }
+}
+/* Fehlende Vorschauen erzeugen. Laeuft einmal durch und schreibt sie ins
+   Repository, danach ist die Galerie billig. */
+async function bildVorschauenBauen(){
+  const offen=bildAlle().filter(p=>!(GH.baum&&GH.baum[thumbPfad(p)]));
+  if(!offen.length){ toast("Alle Vorschauen liegen schon vor"); return; }
+  let n=0;
+  for(const p of offen){
+    try{
+      const url=await bildDatenUrl(p);
+      const jpg=await bildVerkleinern(url,THUMBKANTE);
+      await ghSchreib(thumbPfad(p),jpg,"ProjectTool: Vorschau "+bildName(p));
+      n++; toast("Vorschau "+n+" von "+offen.length);
+    }catch(e){ toast("Vorschau fehlgeschlagen: "+bildName(p)); }
+  }
+  await ghBaum(); BILD.thumbs={}; zeichne(); bildVorschauenNachladen();
+  toast(n+" Vorschauen erzeugt");
+}
+function bildVerkleinern(url,kante){
+  return new Promise((ok,fehl)=>{
+    const i=new Image();
+    i.onload=()=>{
+      const f=Math.min(1,kante/Math.max(i.naturalWidth,i.naturalHeight));
+      const c=document.createElement("canvas");
+      c.width=Math.max(1,Math.round(i.naturalWidth*f));
+      c.height=Math.max(1,Math.round(i.naturalHeight*f));
+      c.getContext("2d").drawImage(i,0,0,c.width,c.height);
+      c.toBlob(async b=>{ ok(new Uint8Array(await b.arrayBuffer())); },"image/jpeg",0.72);
+    };
+    i.onerror=()=>fehl(new Error("Bild nicht lesbar"));
+    i.src=url;
+  });
+}
+
+/* ---- Auswahl fuer die Galerie ---- */
+function bildSicht(){
+  const s=BILD.suche.toLowerCase();
+  return bildAlle().filter(p=>{
+    if(BILD.ordner&&bildOrdner(p)!==BILD.ordner) return false;
+    const e=bildEintrag(p);
+    if(BILD.kat==="_ohne"&&(e.kategorien||[]).length) return false;
+    if(BILD.kat&&BILD.kat!=="_ohne"&&!(e.kategorien||[]).includes(BILD.kat)) return false;
+    if(!s) return true;
+    return (p+" "+(e.titel||"")+" "+(e.beschreibung||"")+" "+(e.kategorien||[]).join(" ")).toLowerCase().includes(s);
+  });
+}
+
+/* ---- Ansicht ---- */
+function vBilder(){
+  if(BILD.laedt) return '<div class="card dim">Bilder werden gelesen …</div>';
+  if(!BILD.reg) { setTimeout(bildInit,0); return '<div class="card dim">Bilder werden gelesen …</div>'; }
+  if(BILD.fehler) return '<div class="card"><p style="color:var(--rot)">'+esc(BILD.fehler)+'</p>'+
+    '<button class="btn" onclick="BILD.reg=null;zeichne()">Noch einmal</button></div>';
+  if(BILD.sel) return vBildEins();
+
+  const alle=bildAlle(), sicht=bildSicht(), ohneVor=alle.filter(p=>!(GH.baum&&GH.baum[thumbPfad(p)])).length;
+  let h='<div class="reihe">'+
+    '<select id="bldOrdner" style="width:auto;flex:1 1 40%"><option value="">Alle Ordner</option>'+
+      bildOrdnerListe().map(o=>'<option value="'+esc(o)+'"'+(BILD.ordner===o?" selected":"")+'>'+esc(o||"Wurzel")+'</option>').join("")+
+    '</select>'+
+    '<select id="bldKat" style="width:auto;flex:1 1 40%"><option value="">Alle Kategorien</option>'+
+      '<option value="_ohne"'+(BILD.kat==="_ohne"?" selected":"")+'>ohne Kategorie</option>'+
+      bildKategorien().map(k=>'<option value="'+esc(k)+'"'+(BILD.kat===k?" selected":"")+'>'+esc(k)+'</option>').join("")+
+    '</select></div>'+
+    '<input type="search" id="bldSuche" placeholder="Suchen in Name, Titel, Beschreibung" value="'+esc(BILD.suche)+'">'+
+    '<p class="dim" style="font-size:11px;margin:7px 0">'+sicht.length+' von '+alle.length+' Bildern'+
+      (ohneVor?' · '+ohneVor+' ohne Vorschau':'')+'</p>';
+  if(ohneVor) h+='<div class="reihe"><button class="btn" id="bldVor">Fehlende Vorschauen erzeugen</button></div>';
+  if(!sicht.length) h+='<div class="card dim">Nichts gefunden.</div>';
+  else{
+    h+='<div class="bldGitter">';
+    sicht.forEach(p=>{
+      const e=bildEintrag(p), vor=BILD.thumbs[p];
+      h+='<div class="bldKachel" data-bild="'+esc(p)+'">'+
+        '<div class="bldVor" data-bildvor="'+esc(p)+'">'+
+          (vor?'<img src="'+vor+'" style="width:100%;height:100%;object-fit:cover;display:block">':'<span class="dim">·</span>')+
+        '</div>'+
+        '<div class="bldTxt">'+esc(e.titel||bildName(p))+'</div>'+
+        ((e.kategorien||[]).length?'<div class="bldKat">'+e.kategorien.map(k=>esc(k)).join(" · ")+'</div>':'')+
+      '</div>';
+    });
+    h+='</div>';
+  }
+  return h;
+}
+
+function vBildEins(){
+  const p=BILD.sel, e=bildEintrag(p), g=GH.baum&&GH.baum[p];
+  const proj=Object.values(PROJ||{}).map(x=>x.name);
+  if(BILD.vollPfad!==p){ setTimeout(async()=>{
+      try{ BILD.voll=await bildDatenUrl(p); BILD.vollPfad=p; zeichne(); }
+      catch(x){ BILD.fehler=x.message; zeichne(); }
+    },0); }
+  let h='<div class="reihe"><button class="btn" id="bldZurueck">← Galerie</button>'+
+    '<button class="btn" id="bldSchneiden">'+(BILD.crop?"Zuschneiden beenden":"Zuschneiden")+'</button></div>'+
+    '<h1 style="font-size:13px;word-break:break-all">'+esc(p)+'</h1>'+
+    '<p class="dim" style="font-size:11px">'+(g?kb(g.size):"")+'</p>';
+
+  if(BILD.vollPfad!==p) h+='<div class="card dim">Bild wird geladen …</div>';
+  else if(BILD.crop){
+    h+='<div id="bldCropWrap" style="position:relative;display:inline-block;max-width:100%;touch-action:none">'+
+       '<img id="bldCropImg" src="'+BILD.voll+'" style="max-width:100%;display:block;border-radius:9px">'+
+       '<div id="bldRahmen" style="position:absolute;border:2px solid var(--akz);background:rgba(0,0,0,.25);display:none"></div>'+
+       '</div>'+
+       '<p class="dim" style="font-size:11px;margin:7px 0">Rahmen mit dem Finger ziehen.</p>'+
+       '<div class="reihe"><button class="btn haupt" id="bldCropSpeichern">Ausschnitt als neues Bild</button></div>';
+    if(BILD.neuPfad) h+='<div class="card"><p style="font-size:12px">Gespeichert als '+esc(BILD.neuPfad)+'</p>'+
+      '<button class="btn warn" id="bldOrigWeg">Original verwerfen</button></div>';
+  }
+  else h+='<img src="'+BILD.voll+'" style="max-width:100%;border-radius:9px">';
+
+  h+='<h2>Angaben</h2><div class="card">'+
+    '<label class="dim" style="font-size:11px">Titel</label>'+
+    '<input type="text" id="bldTitel" value="'+esc(e.titel||"")+'">'+
+    '<label class="dim" style="font-size:11px;margin-top:8px;display:block">Beschreibung</label>'+
+    '<textarea id="bldBeschr" rows="3">'+esc(e.beschreibung||"")+'</textarea>'+
+    '<label class="dim" style="font-size:11px;margin-top:8px;display:block">Kategorien, mit Komma getrennt</label>'+
+    '<input type="text" id="bldKatE" value="'+esc((e.kategorien||[]).join(", "))+'">'+
+    '<label class="dim" style="font-size:11px;margin-top:8px;display:block">Projekt</label>'+
+    '<select id="bldProj"><option value="">ohne</option>'+
+      proj.map(n=>'<option value="'+esc(n)+'"'+(e.projekt===n?" selected":"")+'>'+esc(n)+'</option>').join("")+
+    '</select>'+
+    '<div class="reihe" style="margin-top:10px"><button class="btn haupt" id="bldSpeichern">Angaben sichern</button>'+
+    '<button class="btn" id="bldUmbenennen">Umbenennen</button>'+
+    '<button class="btn warn" id="bldLoeschen">Löschen</button></div></div>';
+  return h;
+}
+
+/* ---- Binden ---- */
+function bindeBilder(){
+  const m=$("#main");
+  const o=$("#bldOrdner"); if(o) o.onchange=()=>{BILD.ordner=o.value;zeichne();bildVorschauenNachladen();};
+  const k=$("#bldKat"); if(k) k.onchange=()=>{BILD.kat=k.value;zeichne();bildVorschauenNachladen();};
+  const s=$("#bldSuche"); if(s) s.oninput=()=>{ BILD.suche=s.value;
+    const pos=s.selectionStart; zeichne(); const n=$("#bldSuche");
+    if(n){n.focus();n.setSelectionRange(pos,pos);} bildVorschauenNachladen(); };
+  const v=$("#bldVor"); if(v) v.onclick=()=>{v.disabled=true;bildVorschauenBauen();};
+  m.querySelectorAll("[data-bild]").forEach(el=>el.onclick=()=>{
+    BILD.sel=el.dataset.bild; BILD.crop=null; BILD.neuPfad=""; zeichne(); });
+  const z=$("#bldZurueck"); if(z) z.onclick=()=>{BILD.sel=null;BILD.crop=null;BILD.neuPfad="";zeichne();bildVorschauenNachladen();};
+  const sc=$("#bldSchneiden"); if(sc) sc.onclick=()=>{BILD.crop=BILD.crop?null:{a:null};BILD.neuPfad="";zeichne();};
+  const sp=$("#bldSpeichern"); if(sp) sp.onclick=bildAngabenSichern;
+  const ub=$("#bldUmbenennen"); if(ub) ub.onclick=bildUmbenennen;
+  const lo=$("#bldLoeschen"); if(lo) lo.onclick=bildLoeschen;
+  const cs=$("#bldCropSpeichern"); if(cs) cs.onclick=bildAusschnittSichern;
+  const ow=$("#bldOrigWeg"); if(ow) ow.onclick=bildOriginalVerwerfen;
+  bindeCrop();
+}
+function bindeCrop(){
+  const wrap=$("#bldCropWrap"), rahmen=$("#bldRahmen");
+  if(!wrap||!rahmen) return;
+  let start=null;
+  const punkt=ev=>{ const r=wrap.getBoundingClientRect();
+    return {x:Math.min(Math.max(ev.clientX-r.left,0),r.width),
+            y:Math.min(Math.max(ev.clientY-r.top,0),r.height),w:r.width,h:r.height}; };
+  wrap.onpointerdown=ev=>{ ev.preventDefault(); start=punkt(ev);
+    rahmen.style.display="block"; rahmen.style.left=start.x+"px"; rahmen.style.top=start.y+"px";
+    rahmen.style.width="0px"; rahmen.style.height="0px"; wrap.setPointerCapture(ev.pointerId); };
+  wrap.onpointermove=ev=>{ if(!start) return; const p=punkt(ev);
+    const x=Math.min(p.x,start.x), y=Math.min(p.y,start.y);
+    const w=Math.abs(p.x-start.x), h=Math.abs(p.y-start.y);
+    rahmen.style.left=x+"px"; rahmen.style.top=y+"px";
+    rahmen.style.width=w+"px"; rahmen.style.height=h+"px";
+    BILD.crop={a:{x:x/p.w,y:y/p.h,w:w/p.w,h:h/p.h}}; };
+  wrap.onpointerup=()=>{ start=null; };
+  wrap.onpointercancel=()=>{ start=null; };
+}
+
+/* ---- Aktionen ---- */
+async function bildAngabenSichern(){
+  const p=BILD.sel;
+  const kat=$("#bldKatE").value.split(",").map(x=>x.trim()).filter(Boolean);
+  BILD.reg.bilder[p]={titel:$("#bldTitel").value.trim(),
+    beschreibung:$("#bldBeschr").value.trim(), kategorien:kat,
+    projekt:$("#bldProj").value, geaendert:heute()};
+  try{ await bildRegSchreiben("ProjectTool: Angaben zu "+bildName(p)); toast("Gesichert"); zeichne(); }
+  catch(e){ toast("Fehler: "+e.message); }
+}
+async function bildUmbenennen(){
+  const p=BILD.sel;
+  const neu=prompt("Neuer Dateiname",bildName(p));
+  if(!neu||neu===bildName(p)) return;
+  const ziel=(bildOrdner(p)?bildOrdner(p)+"/":"")+neu;
+  if(GH.baum[ziel]){ toast("Name ist belegt"); return; }
+  try{
+    const u=await bildBytes(p);
+    await ghSchreib(ziel,u,"ProjectTool: umbenannt zu "+neu);
+    await ghLoeschen(p,GH.baum[p].sha,"ProjectTool: alter Name "+bildName(p));
+    const e=BILD.reg.bilder[p]; if(e){ BILD.reg.bilder[ziel]=e; delete BILD.reg.bilder[p]; }
+    const tp=thumbPfad(p);
+    if(GH.baum[tp]) await ghLoeschen(tp,GH.baum[tp].sha,"ProjectTool: alte Vorschau");
+    await bildRegSchreiben("ProjectTool: Register nach Umbenennung");
+    await ghBaum(); delete BILD.thumbs[p]; BILD.sel=ziel; BILD.vollPfad=""; zeichne();
+    toast("Umbenannt");
+  }catch(e){ toast("Fehler: "+e.message); }
+}
+async function bildLoeschen(){
+  const p=BILD.sel;
+  if(!confirm("Bild "+bildName(p)+" wirklich aus dem Repository löschen?")) return;
+  try{
+    await ghLoeschen(p,GH.baum[p].sha,"ProjectTool: Bild entfernt");
+    const tp=thumbPfad(p);
+    if(GH.baum[tp]) await ghLoeschen(tp,GH.baum[tp].sha,"ProjectTool: Vorschau entfernt");
+    delete BILD.reg.bilder[p];
+    await bildRegSchreiben("ProjectTool: Register nach Löschung");
+    await ghBaum(); delete BILD.thumbs[p]; BILD.sel=null; BILD.vollPfad=""; zeichne();
+    toast("Gelöscht");
+  }catch(e){ toast("Fehler: "+e.message); }
+}
+/* Ausschnitt wird als eigenes Bild gespeichert. Das Original bleibt, bis es
+   ausdruecklich verworfen wird — der Knopf dafuer steht daneben. */
+async function bildAusschnittSichern(){
+  const p=BILD.sel, a=BILD.crop&&BILD.crop.a;
+  if(!a||a.w<0.01||a.h<0.01){ toast("Erst einen Rahmen ziehen"); return; }
+  const roh=bildName(p).replace(/\.[^.]+$/,"");
+  const neu=prompt("Name für den Ausschnitt",roh+"_ausschnitt.png");
+  if(!neu) return;
+  const ziel=(bildOrdner(p)?bildOrdner(p)+"/":"")+neu;
+  if(GH.baum[ziel]){ toast("Name ist belegt"); return; }
+  try{
+    const u8=await new Promise((ok,fehl)=>{
+      const i=new Image();
+      i.onload=()=>{
+        const c=document.createElement("canvas");
+        c.width=Math.max(1,Math.round(i.naturalWidth*a.w));
+        c.height=Math.max(1,Math.round(i.naturalHeight*a.h));
+        c.getContext("2d").drawImage(i,Math.round(i.naturalWidth*a.x),Math.round(i.naturalHeight*a.y),
+          c.width,c.height,0,0,c.width,c.height);
+        c.toBlob(async b=>ok(new Uint8Array(await b.arrayBuffer())),"image/png");
+      };
+      i.onerror=()=>fehl(new Error("Bild nicht lesbar"));
+      i.src=BILD.voll;
+    });
+    await ghSchreib(ziel,u8,"ProjectTool: Ausschnitt aus "+bildName(p));
+    const e=bildEintrag(p);
+    BILD.reg.bilder[ziel]={titel:e.titel?e.titel+" (Ausschnitt)":"",beschreibung:"",
+      kategorien:(e.kategorien||[]).slice(),projekt:e.projekt||"",
+      aus:p,geaendert:heute()};
+    await bildRegSchreiben("ProjectTool: Register nach Ausschnitt");
+    await ghBaum(); BILD.neuPfad=ziel; zeichne();
+    toast("Ausschnitt gespeichert");
+  }catch(x){ toast("Fehler: "+x.message); }
+}
+async function bildOriginalVerwerfen(){
+  const p=BILD.sel;
+  try{
+    await ghLoeschen(p,GH.baum[p].sha,"ProjectTool: Original nach Ausschnitt verworfen");
+    const tp=thumbPfad(p);
+    if(GH.baum[tp]) await ghLoeschen(tp,GH.baum[tp].sha,"ProjectTool: Vorschau entfernt");
+    delete BILD.reg.bilder[p];
+    await bildRegSchreiben("ProjectTool: Register nach Verwerfen");
+    await ghBaum(); delete BILD.thumbs[p];
+    BILD.sel=BILD.neuPfad; BILD.neuPfad=""; BILD.crop=null; BILD.vollPfad=""; zeichne();
+    toast("Original verworfen");
+  }catch(e){ toast("Fehler: "+e.message); }
+}
+
 /* ================= Zeichnen ================= */
 function zeichne(){
   const pr=P();
@@ -1792,7 +2156,7 @@ function zeichne(){
   if(pr&&pr.config.farbe) document.documentElement.style.setProperty("--akz",pr.config.farbe);
   zeichneSpz(); zeichneReiter();
   const V={_start:vStart,_eingang:vEingang,_ent:vEnt,_dateien:vDateien,_meins:vMeins,_waechter:vWaechter,_repo:vRepo,
-    _bericht:vBericht,_neu:vNeu,_config:vConfig,_merge:vMerge};
+    _bericht:vBericht,_neu:vNeu,_config:vConfig,_merge:vMerge,_bilder:vBilder};
   $("#main").innerHTML=(V[S.tab]||vStart)();
   binde();
   /* Fix 3: nur beim echten Wechsel nach oben. Sonst sprang die Seite
@@ -1803,6 +2167,7 @@ function zeichne(){
 let letzteAnsicht="";
 function binde(){
   const m=$("#main"), pr=P();
+  if(S.tab==="_bilder"){ bindeBilder(); return; }
   m.querySelectorAll("[data-datei]").forEach(el=>el.onclick=()=>{S.datei=el.dataset.datei;zeichne();});
   const zb=$("#zurueck"); if(zb) zb.onclick=()=>{S.datei=null;zeichne();};
   const ds=$("#datS"); if(ds) ds.oninput=()=>{S.filter=ds.value;
