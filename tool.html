@@ -219,7 +219,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T27 12:54", DATUM="2026-08-21 12:54";
+const VERSION="T27 13:02", DATUM="2026-08-21 13:02";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -458,10 +458,16 @@ function standKern(pr){
     log:pr.log.slice(-400),schnipsel:pr.schnipsel,spaeter:pr.spaeter||{}});
 }
 /* Zusammenfuehren, nie ersetzen: was hier liegt bleibt, was dort liegt kommt dazu. */
+/* Bei gleichem Schluessel wurde der fremde Eintrag frueher verworfen. Dabei
+   gingen Felder verloren, die nur im Repository standen. Jetzt werden sie
+   uebernommen: pruefen und zusammenfuehren, nie ersetzen und verlieren. */
 function listeMischen(mein,fremd,schluessel){
-  const da=new Set(mein.map(schluessel));
+  const da=new Map(); mein.forEach(x=>da.set(schluessel(x),x));
   (fremd||[]).forEach(x=>{ if(!x) return; const k=schluessel(x);
-    if(!da.has(k)){ mein.push(x); da.add(k); } });
+    if(!da.has(k)){ mein.push(x); da.set(k,x); }
+    else{ const m=da.get(k);
+      if(m&&typeof m==="object"&&typeof x==="object")
+        Object.keys(x).forEach(f=>{ if(m[f]===undefined) m[f]=x[f]; }); } });
   mein.sort((a,b)=>String(a&&a.t||"").localeCompare(String(b&&b.t||"")));
   return mein;
 }
