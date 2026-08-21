@@ -213,7 +213,7 @@ details.klapp .inh{padding:0 12px 12px}
     <div class="laufzeile"><span id="laufTxt"></span><b id="laufZahl"></b></div>
   </div>
   <div class="quick">
-    <input type="text" id="qIn" placeholder="Notiz, Frage mit ? oder Bug: …" autocomplete="off">
+    <input type="text" id="qIn" placeholder="Notiz · Frage mit ? · Bug: · Regel: · Anweisung:" autocomplete="off">
     <button id="qBtn">Merken</button>
   </div>
   <div class="echo" id="echo"></div>
@@ -229,7 +229,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T31", DATUM="2026-08-21";
+const VERSION="T32", DATUM="2026-08-21";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -951,6 +951,35 @@ function entSchreiben(pr){
   setzeDatei(pr,ENTPFAD,JSON.stringify(pr.ent,null,2));
   sichern();
 }
+/* T31: Die Entscheidungsdatei ist die Wahrheit des Projekts und wird beim
+   Uebernehmen aus dem Eingang NICHT mehr ersetzt, sondern zusammengefuehrt.
+   Vorher ging dabei alles verloren, was oertlich neu war — und umgekehrt
+   kamen neue Fragen aus dem Repo nie an, weil die oertliche Fassung Vorrang
+   hatte und die neue im Eingang liegen blieb (Sebastian: "keine fragen").
+   Regel: Vereinigung nach id. Bei gleicher id behaelt die oertliche Fassung
+   recht, wie ueberall sonst im Werkzeug auch. Nichts wird still verworfen —
+   Kollisionen werden gezaehlt und gemeldet. */
+function entZusammenfuehren(pr,rel){
+  const f=pr.files[rel];
+  if(!f||f.text==null) return null;
+  let fern; try{ fern=JSON.parse(f.text); }catch(e){ return null; }
+  if(!fern||!Array.isArray(fern.eintraege)) return null;
+  let ort=pr.ent||entLesen(pr);
+  if(!ort||!Array.isArray(ort.eintraege))
+    ort={schema:1,projekt:pr.name,erzeugt:heute(),hinweis:"",eintraege:[]};
+  const hab=new Map();
+  ort.eintraege.forEach(e=>{ if(e&&e.id) hab.set(e.id,e); });
+  let dazu=0, gleich=0;
+  fern.eintraege.forEach(e=>{
+    if(!e||!e.id) return;
+    if(hab.has(e.id)){ gleich++; return; }
+    ort.eintraege.push(e); hab.set(e.id,e); dazu++;
+  });
+  if(!ort.hinweis&&fern.hinweis) ort.hinweis=fern.hinweis;
+  pr.ent=ort;
+  entSchreiben(pr);
+  return {dazu,gleich};
+}
 /* ================= Fragebogen (T30) =================
    Liegt im Reiterpunkt Entscheidungen, kein eigenes Werkzeug
    (ent.fragebogen.unter.ent). Fragen und Antworten stehen getrennt
@@ -1524,12 +1553,15 @@ function berichtText(){
   const offen=ent.filter(e=>e.status==="offen");
   s+="## Offene Entscheidungen ("+offen.length+")\n";
   offen.forEach(e=>{ s+="- ["+e.id+"] "+e.text+"\n"; });
-  const fragen=pr.schnipsel.filter(x=>x.art==="frage");
-  const bugs=pr.schnipsel.filter(x=>x.art==="bug");
-  const notizen=pr.schnipsel.filter(x=>x.art==="notiz");
-  s+="\n## Fragen ("+fragen.length+")\n"; fragen.forEach(x=>s+="- "+x.text+"  ("+x.t.slice(0,16).replace("T"," ")+")\n");
-  s+="\n## Bugs ("+bugs.length+")\n"; bugs.forEach(x=>s+="- "+x.text+"  ("+x.t.slice(0,16).replace("T"," ")+")\n");
-  s+="\n## Notizen ("+notizen.length+")\n"; notizen.forEach(x=>s+="- "+x.text+"  ("+x.t.slice(0,16).replace("T"," ")+")\n");
+  MEINSARTEN.forEach(([k,t])=>{
+    const l=pr.schnipsel.filter(x=>x.art===k);
+    s+="\n## "+t+" ("+l.length+")\n";
+    l.forEach(x=>s+="- "+x.text+"  ("+String(x.t||"").slice(0,16).replace("T"," ")+
+      (x.kid?(", "+x.kid):"")+")\n");
+  });
+  const sonst=pr.schnipsel.filter(x=>!MEINSARTEN.some(a=>a[0]===x.art));
+  if(sonst.length){ s+="\n## Sonstiges ("+sonst.length+")\n";
+    sonst.forEach(x=>s+="- ("+x.art+") "+x.text+"\n"); }
   const w=waechter(pr);
   s+="\n## Wächter ("+w.length+")\n"; w.slice(0,40).forEach(x=>s+="- "+x.rel+": "+x.was+"\n");
   s+="\n## Änderungen zuletzt\n";
@@ -1826,6 +1858,22 @@ function eingUebernehmen(rel){
   const pr=P(), ziel=eingangZiel(rel);
   if(!pr.files[rel]) return;
   if(pr.spaeter) delete pr.spaeter[rel];
+  /* T31: nur die Entscheidungsdatei wird zusammengefuehrt. Alles andere
+     bleibt beim glatten Ersetzen — dort ist die Datei als Ganzes gemeint. */
+  if(ziel===ENTPFAD){
+    const r=entZusammenfuehren(pr,rel);
+    if(r){
+      pr.geloescht=pr.geloescht||{};
+      if(pr.files[rel].sha) pr.geloescht[rel]=pr.files[rel].sha;
+      delete pr.files[rel];
+      pr.log.push({t:jetzt(),art:"zusammengeführt",datei:ziel});
+      toast(r.dazu
+        ? (r.dazu+" neue Einträge übernommen, "+r.gleich+" waren schon da")
+        : "Nichts Neues — alle "+r.gleich+" Einträge waren schon da");
+      return;
+    }
+    toast("Datei nicht lesbar — wird ersetzt statt zusammengeführt");
+  }
   verschiebeDatei(pr,rel,ziel);
   pr.log.push({t:jetzt(),art:"übernommen",datei:ziel});
   if(ziel===ENTPFAD) pr.ent=entLesen(pr);
@@ -1969,20 +2017,71 @@ function vDatei(){
 
 function vMeins(){
   const pr=P(); if(!pr) return '<div class="card dim">Kein Projekt.</div>';
-  if(!pr.schnipsel.length) return '<div class="card dim">Noch nichts. Nutze oben die Zeile — ein Fragezeichen macht daraus eine Frage, „Bug:" einen Bug.</div>';
-  const grp={frage:[],bug:[],notiz:[]};
-  pr.schnipsel.forEach((x,i)=>grp[x.art].push({x,i}));
-  let h="";
-  [["frage","Fragen"],["bug","Bugs"],["notiz","Notizen"]].forEach(([k,t])=>{
-    if(!grp[k].length) return;
-    h+=`<h2>${t} <span class="dim">${grp[k].length}</span></h2>`;
+  const kopf=`<div class="reihe" style="margin-bottom:9px">
+    <button class="btn" id="meinsHol">Anmerkungen aus KI/ holen</button></div>`;
+  if(!pr.schnipsel.length) return kopf+
+    '<div class="card dim">Noch nichts. Nutze oben die Zeile — ein Fragezeichen macht daraus eine Frage, „Bug:" einen Bug, „Regel:" eine Regel, „Anweisung:" eine Anweisung.</div>';
+  /* T31: unbekannte Arten aus aelteren Staenden fallen nicht mehr durch,
+     sie landen sichtbar unter Sonstiges statt einen Fehler zu werfen. */
+  const grp={}; MEINSARTEN.forEach(([k])=>grp[k]=[]);
+  pr.schnipsel.forEach((x,i)=>{ (grp[x.art]=grp[x.art]||[]).push({x,i}); });
+  const titel={}; MEINSARTEN.forEach(([k,t])=>titel[k]=t);
+  const reihen=MEINSARTEN.map(([k])=>k)
+    .concat(Object.keys(grp).filter(k=>!titel[k]));
+  let h=kopf;
+  reihen.forEach(k=>{
+    if(!grp[k]||!grp[k].length) return;
+    h+=`<h2>${esc(titel[k]||("Sonstiges: "+k))} <span class="dim">${grp[k].length}</span></h2>`;
     grp[k].slice().reverse().forEach(({x,i})=>{
       h+=`<div class="card"><div style="font-size:13px">${esc(x.text)}</div>
-        <div class="dim" style="font-size:10.5px;margin-top:5px">${esc(x.t.slice(0,16).replace("T"," "))}
-        ${x.zu?" · zu "+esc(x.zu):""}</div>
+        <div class="dim" style="font-size:10.5px;margin-top:5px">${esc(String(x.t||"").slice(0,16).replace("T"," "))}
+        ${x.zu?" · zu "+esc(x.zu):""}${x.kid?" · "+esc(x.kid):""}</div>
         <div class="reihe" style="margin:7px 0 0"><button class="btn" data-del="${i}" style="font-size:11px;padding:6px 10px">Löschen</button></div></div>`;});
   });
   return h;
+}
+
+/* T31: Sebastians Anmerkungen lagen in KI/anmerkungen/sebastian.json, also
+   auf der KI-Seite, und tauchten in Meins nie auf ("meins nicht
+   vollstaendig", ho.0821n.meins.folgen Punkt 1). Sie werden hier KOPIERT,
+   nicht verschoben — die Quelldatei bleibt unberuehrt, ob sie als Altstand
+   stehen bleibt, ist nicht entschieden. Zweimal Holen legt nichts doppelt
+   an, der Abgleich laeuft ueber die Ursprungskennung in kid. */
+const KIANM="KI/anmerkungen/sebastian.json";
+function kiArt(e){
+  const s=(Array.isArray(e.stich)?e.stich.join(" "):String(e.stich||"")).toLowerCase();
+  const t=String(e.text||"");
+  if(s.includes("bug")||/^bug[:\s]/i.test(t)) return "bug";
+  if(s.includes("regel")) return "regel";
+  if(s.includes("anweisung")) return "anweisung";
+  if(s.includes("frage")||t.trim().endsWith("?")) return "frage";
+  return "notiz";
+}
+async function meinsAusKI(){
+  const pr=P(); if(!pr){ alert("Erst ein Projekt laden."); return; }
+  if(!await ghVerbinden()){ alert("Keine Verbindung: "+GH.fehler); return; }
+  let j;
+  try{
+    const o=await (await ghRuf("/repos/"+GH.repo+"/contents/"+KIANM+"?ref="+GH.zweig)).json();
+    const b=atob(String(o.content||"").replace(/\s/g,""));
+    const u=new Uint8Array(b.length);
+    for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i);
+    j=JSON.parse(DEC.decode(u));
+  }catch(e){ alert("Konnte "+KIANM+" nicht lesen:\n"+e.message); return; }
+  const liste=(j&&j.eintraege)||[];
+  if(!liste.length){ toast("Keine Einträge in "+KIANM); return; }
+  const hab=new Set(pr.schnipsel.map(x=>x.kid).filter(Boolean));
+  let dazu=0;
+  liste.forEach(e=>{
+    if(!e||!e.id||hab.has(e.id)) return;
+    pr.schnipsel.push({t:(e.datum?String(e.datum)+"T00:00:00":jetzt()),
+      art:kiArt(e), text:String(e.text||""), zu:null,
+      kid:e.id, kstatus:e.status||"", kquelle:"KI/anmerkungen"});
+    hab.add(e.id); dazu++;
+  });
+  sichern(); zeichne();
+  toast(dazu?(dazu+" Anmerkungen geholt, "+(liste.length-dazu)+" waren schon da")
+            :"Nichts Neues — alle "+liste.length+" waren schon da");
 }
 
 function vWaechter(){
@@ -2175,6 +2274,7 @@ function binde(){
   m.querySelectorAll("[data-entkomm]").forEach(b=>b.onclick=()=>{
     const t=prompt("Dazu sagen:"); if(!t) return;
     schnipsel(t,b.dataset.entkomm); toast("Notiert");});
+  const mh=$("#meinsHol"); if(mh) mh.onclick=meinsAusKI;
   m.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{
     pr.schnipsel.splice(+b.dataset.del,1); sichern(); zeichne();});
   m.querySelectorAll("[data-farbe]").forEach(b=>b.onclick=()=>{
@@ -2234,15 +2334,31 @@ function bearbeiten(){
 }
 
 /* ================= Schnipsel ================= */
+/* T31: Meins kannte nur frage, bug, notiz. Anweisungen und Regeln hatten
+   keinen Platz und landeten als Notiz. Erkannt wird nur an einem klaren
+   Praefix — geraten wird nicht. Die Reihenfolge der Pruefung zaehlt:
+   "Regel: passt das?" ist eine Regel, keine Frage. */
+const MEINSARTEN=[["anweisung","Anweisungen","Anweisung"],["regel","Regeln","Regel"],
+  ["frage","Fragen","Frage"],["bug","Bugs","Bug"],["notiz","Notizen","Notiz"]];
+function meinsArt(text){
+  if(/^bug[:\s]/i.test(text)) return "bug";
+  if(/^regel[:\s]/i.test(text)) return "regel";
+  if(/^anweisung[:\s]/i.test(text)) return "anweisung";
+  if(text.includes("?")) return "frage";
+  return "notiz";
+}
+function meinsName(art){
+  const t=MEINSARTEN.find(x=>x[0]===art);
+  return t?t[2]:"Notiz";
+}
 function schnipsel(text,zu){
   const pr=P(); if(!pr){ alert("Erst ein Projekt laden."); return; }
-  let art="notiz";
-  if(/^bug[:\s]/i.test(text)) art="bug";
-  else if(text.includes("?")) art="frage";
-  pr.schnipsel.push({t:jetzt(),art,text:text.replace(/^bug[:\s]*/i,""),zu:zu||null});
+  const art=meinsArt(text);
+  pr.schnipsel.push({t:jetzt(),art,
+    text:text.replace(/^(bug|regel|anweisung)[:\s]*/i,""),zu:zu||null});
   sichern();
   const e=$("#echo");
-  e.textContent=(art==="bug"?"Bug":art==="frage"?"Frage":"Notiz")+" gemerkt · "+pr.schnipsel.length+" gesamt";
+  e.textContent=meinsName(art)+" gemerkt · "+pr.schnipsel.length+" gesamt";
   setTimeout(()=>{ if(e) e.textContent=""; },3500);
   if(S.tab==="_meins") zeichne(); else zeichneReiter();
 }
