@@ -225,7 +225,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T27 12:36", DATUM="2026-08-21 12:36";
+const VERSION="T27 12:52", DATUM="2026-08-21 12:52";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -706,10 +706,18 @@ function b64Von(u8){
   for(let i=0;i<u8.length;i+=8192) s+=String.fromCharCode.apply(null,u8.subarray(i,i+8192));
   return btoa(s);
 }
-const jetzt=()=>new Date().toISOString();
+/* Zeitstempel in Ortszeit mit Versatz. Vorher lief alles in UTC, dadurch
+   trugen Notizen und Log zwei Stunden zu wenig. */
+function jetzt(){
+  const d=new Date(), p=n=>String(n).padStart(2,"0");
+  const v=-d.getTimezoneOffset(), vz=v<0?"-":"+", va=Math.abs(v);
+  return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"T"+
+    p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds())+"."+
+    String(d.getMilliseconds()).padStart(3,"0")+vz+p(Math.floor(va/60))+":"+p(va%60);
+}
 const stamp=()=>{const d=new Date(),p=n=>String(n).padStart(2,"0");
   return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"_"+p(d.getHours())+"-"+p(d.getMinutes());};
-const heute=()=>new Date().toISOString().slice(0,10);
+const heute=()=>jetzt().slice(0,10);
 function toast(t){ if(TOAST)TOAST.remove();
   TOAST=document.createElement("div"); TOAST.className="toast"; TOAST.textContent=t;
   document.body.appendChild(TOAST); setTimeout(()=>{if(TOAST){TOAST.remove();TOAST=null;}},1900); }
