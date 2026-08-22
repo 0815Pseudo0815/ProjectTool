@@ -229,7 +229,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T35", DATUM="2026-08-22";
+const VERSION="T36", DATUM="2026-08-22";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -733,7 +733,23 @@ document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="hidden"){ clearTimeout(ghTimer); ghAuto(); }
 });
 
+/* T36: ghAuto schuetzt sich seit T25 gegen das Handsenden (Pruefung auf
+   ghLaeuft und LAUF), umgekehrt gab es nichts. ghSchieben setzte seine Sperre
+   erst mit laufAn — also erst nach ghVerbinden und ghBaum. In diesem Fenster
+   schrieb ghAuto dieselben Dateien und zog f.sha nach, waehrend ghSchieben
+   noch den alten Baum hielt und darauf Konflikt meldete. Ergebnis am
+   2026-08-22 um 03:51: "0 gesendet, 3 nicht", obwohl alle drei Dateien in
+   derselben Sekunde im Repository landeten. Siehe bef.0822.senden.doppelt.
+   Ab hier wartet das Handsenden den Automatiklauf ab und sperrt ihn danach
+   selbst aus. Der Rumpf ist unveraendert und heisst nur noch ghSchiebenKern. */
 async function ghSchieben(nachricht,alle){
+  for(let w=0; ghLaeuft && w<100; w++) await warte(100);   /* bis zu 10 s */
+  if(ghLaeuft){ alert("Das selbsttätige Senden läuft noch. Gleich noch einmal."); return; }
+  ghLaeuft=true; zeichneSpz();
+  try{ await ghSchiebenKern(nachricht,alle); }
+  finally{ ghLaeuft=false; zeichneSpz(); }
+}
+async function ghSchiebenKern(nachricht,alle){
   const offen=ghOffen(alle);
   if(!offen.length){ toast("Nichts zu senden"); return; }
   if(!await ghVerbinden()){ alert("Keine Verbindung: "+GH.fehler); return; }
