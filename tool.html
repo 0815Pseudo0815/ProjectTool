@@ -229,7 +229,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T34", DATUM="2026-08-21";
+const VERSION="T35", DATUM="2026-08-22";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -367,8 +367,19 @@ function warte(ms){ return new Promise(r=>setTimeout(r,ms)); }
    Sebastian sah am 2026-08-21 um 23:33 und 23:44 je drei identische 409
    im Abstand von 1,4 und 2,3 Sekunden — dreimal derselbe veraltete sha.
    Der Konflikt wird jetzt in ghSchreibFrisch behandelt, wo er hingehoert. */
+/* T35: Der 422 gehoert dazu. Sebastian sah am 2026-08-22 um 03:38
+   'Abgelehnt — Datei wurde inzwischen geaendert [422] — Invalid request.
+   "sha" wasn't supplied.' Ursache: seit T34 werden Datenbankdateien
+   mehrfach im selben Durchlauf geschrieben. Beim zweiten Mal liegt die
+   Datei fern schon, der mitgefuehrte Baum kennt sie aber noch nicht, also
+   geht der Schreibvorgang ohne sha raus und GitHub lehnt ab. Das ist
+   derselbe Fall wie der 409, nur von der anderen Seite: der bekannte Stand
+   passt nicht zum tatsaechlichen. Also auch dieselbe Behandlung — Baum
+   frisch holen, einmal erneut. */
 function konfliktFehler(e){
-  return String(e&&e.message||"").indexOf("Repository hat sich zwischendurch geaendert")>=0;
+  const m=String(e&&e.message||"");
+  return m.indexOf("Repository hat sich zwischendurch geaendert")>=0
+      || m.indexOf("Datei wurde inzwischen geaendert")>=0;
 }
 function netzFehler(e){
   const m=String(e&&e.message||"");
@@ -382,14 +393,20 @@ async function ghSchreibFrisch(voll,u8,nachricht,baum,shaVorgabe){
   const sha=shaVorgabe!==undefined
     ? shaVorgabe
     : (baum&&baum[voll]?baum[voll].sha:null);
+  /* T35: der neue sha geht sofort in den mitgefuehrten Baum zurueck. Wird
+     dieselbe Datei im selben Durchlauf noch einmal geschrieben — seit T34
+     der Regelfall bei den Datenbankindexen —, kennt der Baum dann bereits
+     den richtigen Stand. Damit entsteht der 422 erst gar nicht, statt
+     nachtraeglich abgefangen zu werden. */
+  const merke=neu=>{ if(baum&&neu) baum[voll]={sha:neu}; return neu; };
   try{
-    return await mitWiederholung(()=>ghSchreib(voll,u8,nachricht,sha));
+    return merke(await mitWiederholung(()=>ghSchreib(voll,u8,nachricht,sha)));
   }catch(e){
     if(!konfliktFehler(e)) throw e;
     const frisch=await ghBaum();
     if(baum) Object.keys(frisch).forEach(k=>{ baum[k]=frisch[k]; });
-    return await mitWiederholung(()=>ghSchreib(voll,u8,nachricht,
-      frisch[voll]?frisch[voll].sha:null));
+    return merke(await mitWiederholung(()=>ghSchreib(voll,u8,nachricht,
+      frisch[voll]?frisch[voll].sha:null)));
   }
 }
 async function mitWiederholung(fn,versuche){
