@@ -229,7 +229,7 @@ details.klapp .inh{padding:0 12px 12px}
 
 <script>
 "use strict";
-const VERSION="T33", DATUM="2026-08-21";
+const VERSION="T34", DATUM="2026-08-21";
 /* Fix 2: Quelltext EINMAL beim Start sichern. Spaeter enthaelt der DOM
    gerenderte Inhalte — der Export wuerde sonst bei jedem Mal wachsen. */
 const TOOLQUELLE="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
@@ -530,13 +530,13 @@ function standScheibe(pr){
   /* T26: spaeter (zurueckgestellte Eingaenge) hing bis T25 allein am Browser.
      Steht jetzt mit im Repository. */
   return {version:VERSION,gesichert:jetzt(),dir:pr.dir,
-    config:pr.config,meta:pr.meta,log:pr.log.slice(-400),schnipsel:pr.schnipsel,
+    config:pr.config,meta:pr.meta,log:pr.log.slice(-400),dbMigriert:!!pr.dbMigriert,schnipsel:pr.schnipsel,
     spaeter:pr.spaeter||{}};
 }
 /* Kern ohne Zeitstempel — nur er entscheidet, ob gesendet werden muss. */
 function standKern(pr){
   return JSON.stringify({config:pr.config,meta:pr.meta,
-    log:pr.log.slice(-400),schnipsel:pr.schnipsel,spaeter:pr.spaeter||{}});
+    log:pr.log.slice(-400),dbMigriert:!!pr.dbMigriert,schnipsel:pr.schnipsel,spaeter:pr.spaeter||{}});
 }
 /* Zusammenfuehren, nie ersetzen: was hier liegt bleibt, was dort liegt kommt dazu. */
 /* Bei gleichem Schluessel wurde der fremde Eintrag frueher verworfen. Dabei
@@ -957,7 +957,7 @@ function configSchreiben(pr){
   if(f&&f.text!=null){ try{ c=JSON.parse(f.text); }catch(e){ c={}; } }
   c.accent=pr.config.farbe;
   setzeDatei(pr,CFGPFAD,JSON.stringify(c,null,2));
-  pr.log.push({t:jetzt(),art:"geaendert",datei:CFGPFAD});
+  dbSpur(pr,"geaendert",CFGPFAD);
 }
 function entSchreiben(pr){
   if(!pr.ent) return;
@@ -1042,7 +1042,7 @@ async function speichereAntwort(id,k,kommentar){
     haengt_an:[id], datum:heute(), quelle:"Fragebogen"};
   pr.ent.eintraege.push(a);
   f.status = k===null ? "offen" : (zurueck ? "zurueck" : "beantwortet");
-  pr.log.push({t:stempel,art:"neu",datei:ENTPFAD});
+  dbSpur(pr,"neu",ENTPFAD,null,{zeit:stempel});
   entSchreiben(pr);
   return a;
 }
@@ -1309,7 +1309,7 @@ function mergeAnwenden(dateiWahl,entWahl){
   PENDING.neu.forEach((x,i)=>{
     if(dateiWahl.neu[i]===false) return;
     const pr=PROJ[x.proj]; pr.files[x.rel]=x.rec;
-    pr.log.push({t:jetzt(),art:"neu",datei:x.rel});
+    dbSpur(pr,"neu",x.rel);
   });
   PENDING.geaendert.forEach((x,i)=>{
     const w=dateiWahl.ge[i];
@@ -1318,10 +1318,10 @@ function mergeAnwenden(dateiWahl,entWahl){
     if(w==="beide"){
       const bak=x.rel.replace(/(\.[^./]+)?$/,m=>"_meine_"+stamp()+(m||""));
       pr.files[bak]={bytes:x.alt.bytes,text:x.alt.text,ext:x.alt.ext};
-      pr.log.push({t:jetzt(),art:"gesichert",datei:bak});
+      dbSpur(pr,"gesichert",bak);
     }
     pr.files[x.rel]=x.rec;
-    pr.log.push({t:jetzt(),art:"geaendert",datei:x.rel});
+    dbSpur(pr,"geaendert",x.rel);
   });
   if(PENDING.entDiff){
     const pr=PROJ[PENDING.entDiff.proj]||pr0;
@@ -1371,7 +1371,7 @@ function standObjekt(){
   const o={version:VERSION,gesichert:jetzt(),cur:CUR,tab:S.tab,projekte:{}};
   Object.keys(PROJ).forEach(n=>{
     const pr=PROJ[n];
-    o.projekte[n]={config:pr.config,meta:pr.meta,log:pr.log.slice(-400),
+    o.projekte[n]={config:pr.config,meta:pr.meta,log:pr.log.slice(-400),dbMigriert:!!pr.dbMigriert,
       schnipsel:pr.schnipsel,dir:pr.dir,spaeter:pr.spaeter||{}};
   });
   return o;
@@ -1578,10 +1578,155 @@ function berichtText(){
   const w=waechter(pr);
   s+="\n## Wächter ("+w.length+")\n"; w.slice(0,40).forEach(x=>s+="- "+x.rel+": "+x.was+"\n");
   s+="\n## Änderungen zuletzt\n";
-  pr.log.slice(-30).forEach(l=>s+="- "+l.t.slice(0,16).replace("T"," ")+" "+l.art+" "+l.datei+"\n");
+  spurLesen(pr,30).forEach(l=>s+="- "+String(l.zeit||"").slice(0,16).replace("T"," ")+" "+l.art+" "+(l.datei||l.text)+"\n");
   s+="\n## Bestand\n"+Object.keys(pr.files).length+" Dateien, "+ent.length+" Entscheidungen.\n";
   return s;
 }
+/* ================= _Database =================
+   Setzt schema.database um. Der Ordner liegt im Projekt und geht damit
+   ueber den normalen Weg mit ins Repository — keine eigene Sendemechanik.
+
+   Aufbau: _Database/index.json verweist NUR auf die Bereichsindexe, nie auf
+   einzelne Eintraege, und bleibt so klein genug fuer jeden Start. Je Bereich
+   ein Ordner mit eigenem index.json. Dateien sind datiert, durchnummeriert
+   und werden ausschliesslich angehaengt, nie ueberschrieben; ueber DBMAX
+   rollt eine neue Nummer.
+
+   Prinzip 2: die Register baut die Seite selbst, nicht die KI.
+   Prinzip 3: jede Handlung landet in spur/, lueckenlos.
+   Prinzip 9: abgeleitet_aus haelt den Stand der Quelle fest. Weicht er
+   spaeter ab, ist das Abgeleitete veraltet und faellt auf, ohne Suche. */
+const DBWURZEL="_Database/";
+const DBMAX=64*1024;
+const DBBEREICHE=["spur","zustand","funktionen","pruefung","wissen","verlauf"];
+
+function dbLfd(pr,bereich){
+  /* Juengste Datei des Tages finden. Passt der Eintrag nicht mehr hinein,
+     faengt die naechste Nummer an. */
+  const tag=heute().replace(/-/g,"");
+  const pre=DBWURZEL+bereich+"/"+tag+"_";
+  const da=Object.keys(pr.files).filter(k=>k.startsWith(pre)&&k.endsWith(".json"))
+    .map(k=>parseInt(k.slice(pre.length,-5),10)).filter(n=>!isNaN(n)).sort((a,b)=>a-b);
+  return da.length?da[da.length-1]:1;
+}
+function dbDatei(pr,bereich,zusatz){
+  const tag=heute().replace(/-/g,"");
+  let n=dbLfd(pr,bereich);
+  let rel=DBWURZEL+bereich+"/"+tag+"_"+String(n).padStart(3,"0")+".json";
+  const f=pr.files[rel];
+  if(f&&f.text&&(f.text.length+zusatz)>DBMAX)
+    rel=DBWURZEL+bereich+"/"+tag+"_"+String(n+1).padStart(3,"0")+".json";
+  return rel;
+}
+function dbLies(pr,rel){
+  const f=pr.files[rel];
+  if(!f||f.text==null) return null;
+  try{ const o=JSON.parse(f.text); return Array.isArray(o.eintraege)?o:null; }
+  catch(e){ return null; }
+}
+let dbZaehler=0;
+function dbKennung(bereich){
+  const z=jetzt();
+  dbZaehler=(dbZaehler+1)%10000;
+  return bereich+"."+z.slice(0,10).replace(/-/g,"")+"."+z.slice(11,13)+z.slice(14,16)
+    +"."+String(dbZaehler).padStart(4,"0");
+}
+/* Einziger Weg, in die Datenbank zu schreiben. Haengt an, nie ueberschreiben. */
+function dbSchreib(pr,bereich,eintrag){
+  if(!pr) return null;
+  const e=Object.assign({
+    id:dbKennung(bereich), art:"eintrag", zeit:jetzt(), text:"",
+    stich:[], status:"gilt", quelle:"werkzeug", haengt_an:[], abgeleitet_aus:[]
+  },eintrag||{});
+  const rel=dbDatei(pr,bereich,JSON.stringify(e).length);
+  const o=dbLies(pr,rel)||{schema:1,bereich,erzeugt:jetzt(),eintraege:[]};
+  o.eintraege.push(e);
+  setzeDatei(pr,rel,JSON.stringify(o,null,1));
+  dbIndexBereich(pr,bereich);
+  return e;
+}
+/* Prinzip 2: das Register baut die Seite, aus dem was wirklich dasteht. */
+function dbIndexBereich(pr,bereich){
+  const pre=DBWURZEL+bereich+"/";
+  const dateien=[];
+  let n=0;
+  Object.keys(pr.files).filter(k=>k.startsWith(pre)&&k.endsWith(".json")
+    &&!k.endsWith("/index.json")).sort().forEach(rel=>{
+      const o=dbLies(pr,rel);
+      if(!o) return;
+      const ids=o.eintraege.map(x=>x.id);
+      n+=ids.length;
+      dateien.push({datei:rel.slice(pre.length),n:ids.length,ids});
+    });
+  setzeDatei(pr,pre+"index.json",JSON.stringify(
+    {schema:1,bereich,aktualisiert:jetzt(),n_eintraege:n,dateien},null,1));
+  dbIndexHaupt(pr);
+}
+function dbIndexHaupt(pr){
+  const bereiche=[];
+  DBBEREICHE.forEach(b=>{
+    const o=dbLies0(pr,DBWURZEL+b+"/index.json");
+    if(o) bereiche.push({bereich:b,index:b+"/index.json",
+      n_eintraege:o.n_eintraege||0,aktualisiert:o.aktualisiert||null});
+  });
+  setzeDatei(pr,DBWURZEL+"index.json",JSON.stringify(
+    {schema:1,projekt:pr.name,aktualisiert:jetzt(),
+     hinweis:"Verweist nur auf die Bereichsindexe. Eintraege stehen in den Bereichsordnern.",
+     bereiche},null,1));
+}
+function dbLies0(pr,rel){
+  const f=pr.files[rel];
+  if(!f||f.text==null) return null;
+  try{ return JSON.parse(f.text); }catch(e){ return null; }
+}
+/* Prinzip 3: jede Handlung der Seite. Ersetzt das alte pr.log — es gibt
+   die Handlung genau einmal, nicht einmal als Protokoll und einmal hier. */
+function dbSpur(pr,art,datei,text,mehr){
+  if(!pr) return null;
+  return dbSchreib(pr,"spur",Object.assign({
+    art, datei:datei||null,
+    text:text||((art||"")+(datei?(" "+datei):""))
+  },mehr||{}));
+}
+/* Liest die Spur rueckwaerts, juengste zuerst. Alle Anzeigen holen sie
+   hier — abgeschrieben wird nichts (Prinzip 10). */
+function spurLesen(pr,n){
+  if(!pr) return [];
+  const pre=DBWURZEL+"spur/";
+  const raus=[];
+  Object.keys(pr.files).filter(k=>k.startsWith(pre)&&k.endsWith(".json")
+    &&!k.endsWith("/index.json")).sort().reverse().forEach(rel=>{
+      if(n&&raus.length>=n) return;
+      const o=dbLies(pr,rel);
+      if(!o) return;
+      for(let i=o.eintraege.length-1;i>=0;i--){
+        raus.push(o.eintraege[i]);
+        if(n&&raus.length>=n) return;
+      }
+    });
+  return raus;
+}
+/* Einmalige Uebernahme des alten Protokolls, damit nichts verlorengeht.
+   Laeuft genau einmal je Projekt und haelt das im Projekt selbst fest. */
+function dbUebernahme(pr){
+  if(!pr||pr.dbMigriert) return 0;
+  const alt=Array.isArray(pr.log)?pr.log:[];
+  pr.dbMigriert=true;
+  if(!alt.length){ dbIndexHaupt(pr); return 0; }
+  const tag=heute().replace(/-/g,"");
+  const rel=DBWURZEL+"spur/"+tag+"_000.json";
+  const o=dbLies(pr,rel)||{schema:1,bereich:"spur",erzeugt:jetzt(),eintraege:[]};
+  alt.forEach((l,i)=>o.eintraege.push({
+    id:"spur.uebernahme."+String(i).padStart(4,"0"),
+    art:l.art||"geaendert", zeit:l.t||jetzt(), datei:l.datei||null,
+    text:(l.art||"")+(l.datei?(" "+l.datei):""),
+    stich:["uebernahme"], status:"gilt", quelle:"werkzeug",
+    haengt_an:[], abgeleitet_aus:[]}));
+  setzeDatei(pr,rel,JSON.stringify(o,null,1));
+  dbIndexBereich(pr,"spur");
+  return alt.length;
+}
+
 function waechter(pr){
   const tr=[];
   Object.keys(pr.files).forEach(rel=>{
@@ -1808,9 +1953,10 @@ function vStart(){
   });
   if(offen.length>8) h+=`<div class="card dim" style="font-size:12px">… und ${offen.length-8} weitere unter Entscheidungen.</div>`;
   h+=`<h2>Zuletzt geändert</h2>`;
-  if(!pr.log.length) h+=`<div class="card dim">Noch nichts.</div>`;
-  else pr.log.slice(-6).reverse().forEach(l=>{
-    h+=`<div class="zeile"><span class="nm">${esc(l.datei)}</span><span class="kb">${esc(l.art)}</span></div>`;});
+  const sp=spurLesen(pr,6);
+  if(!sp.length) h+=`<div class="card dim">Noch nichts.</div>`;
+  else sp.forEach(l=>{
+    h+=`<div class="zeile"><span class="nm">${esc(l.datei||l.text)}</span><span class="kb">${esc(l.art)}</span></div>`;});
   return h;
 }
 
@@ -1879,7 +2025,7 @@ function eingUebernehmen(rel){
       pr.geloescht=pr.geloescht||{};
       if(pr.files[rel].sha) pr.geloescht[rel]=pr.files[rel].sha;
       delete pr.files[rel];
-      pr.log.push({t:jetzt(),art:"zusammengeführt",datei:ziel});
+      dbSpur(pr,"zusammengeführt",ziel);
       toast(r.dazu
         ? (r.dazu+" neue Einträge übernommen, "+r.gleich+" waren schon da")
         : "Nichts Neues — alle "+r.gleich+" Einträge waren schon da");
@@ -1888,7 +2034,7 @@ function eingUebernehmen(rel){
     toast("Datei nicht lesbar — wird ersetzt statt zusammengeführt");
   }
   verschiebeDatei(pr,rel,ziel);
-  pr.log.push({t:jetzt(),art:"übernommen",datei:ziel});
+  dbSpur(pr,"übernommen",ziel);
   if(ziel===ENTPFAD) pr.ent=entLesen(pr);
   if(ziel===CFGPFAD) configUebernehmen(pr);
 }
@@ -1897,7 +2043,7 @@ function eingVerwerfen(rel){
   if(!pr.files[rel]) return;
   if(pr.spaeter) delete pr.spaeter[rel];
   verschiebeDatei(pr,rel,VERWORFEN+stamp()+"/"+eingangZiel(rel));
-  pr.log.push({t:jetzt(),art:"verworfen",datei:rel});
+  dbSpur(pr,"verworfen",rel);
 }
 
 function dlgGitHub(){
@@ -2238,6 +2384,10 @@ function vMerge(){
 /* ================= Zeichnen ================= */
 function zeichne(){
   const pr=P();
+  /* Einmal je Projekt: altes Protokoll in die Spur ueberfuehren und die
+     Datenbank anlegen. Danach ist dbMigriert gesetzt und es passiert nichts
+     mehr. Laeuft still — Sebastian soll davon nichts merken. */
+  if(pr&&!pr.dbMigriert){ try{ dbUebernahme(pr); sichern(); }catch(e){} }
   $("#verTxt").textContent=VERSION;
   $("#projName").textContent=pr?pr.name:"Projekt wählen";
   $("#projZahl").textContent=pr?Object.keys(pr.files).length:"";
@@ -2340,7 +2490,7 @@ function bearbeiten(){
     <button class="btn" id="edNo">Abbrechen</button></div>`,()=>{
       $("#edOk").onclick=()=>{
         setzeDatei(pr,rel,$("#edT").value);
-        pr.log.push({t:jetzt(),art:"bearbeitet",datei:rel});
+        dbSpur(pr,"bearbeitet",rel);
         if(rel===ENTPFAD) pr.ent=entLesen(pr);
         zuDlg(); sichern(); zeichne(); toast("Gespeichert");};
       $("#edNo").onclick=zuDlg;});
@@ -2469,7 +2619,7 @@ function entSpeichern(alt){
   if(g) o.grund=g; else delete o.grund;
   o.datum=heute();
   if(!alt) pr.ent.eintraege.push(o);
-  pr.log.push({t:jetzt(),art:alt?"geaendert":"neu",datei:ENTPFAD});
+  dbSpur(pr,alt?"geaendert":"neu",ENTPFAD);
   entSchreiben(pr);
   zuDlg(); zeichne(); toast(alt?"Geändert":"Angelegt");
 }
@@ -2478,7 +2628,7 @@ function entLoeschen(id){
   if(!confirm("Eintrag "+id+" löschen?\n\nBesser ist der Status \"ueberholt\": "+
       "dann bleibt nachvollziehbar, was einmal galt.\n\nTrotzdem löschen?")) return;
   pr.ent.eintraege=pr.ent.eintraege.filter(x=>x.id!==id);
-  pr.log.push({t:jetzt(),art:"geloescht",datei:ENTPFAD});
+  dbSpur(pr,"geloescht",ENTPFAD);
   entSchreiben(pr);
   zuDlg(); zeichne(); toast("Gelöscht");
 }
@@ -2863,11 +3013,11 @@ function sessionEnde(){
   s+="\n## Meins\n";
   pr.schnipsel.forEach(x=>s+="- ("+x.art+") "+x.text+"\n");
   s+="\n## Geändert\n";
-  pr.log.slice(-60).forEach(l=>s+="- "+l.t.slice(0,16).replace("T"," ")+" "+l.art+" "+l.datei+"\n");
+  spurLesen(pr,60).forEach(l=>s+="- "+String(l.zeit||"").slice(0,16).replace("T"," ")+" "+l.art+" "+(l.datei||l.text)+"\n");
   const rel="08_Sessions/"+d+".md";
   const alt=pr.files[rel]?pr.files[rel].text+"\n\n---\n\n":"";
   setzeDatei(pr,rel,alt+s);
-  pr.log.push({t:jetzt(),art:"session",datei:rel});
+  dbSpur(pr,"session",rel);
   sichern(); S.tab="_dateien"; S.datei=rel; zeichne(); toast("Session gesichert");
 }
 
